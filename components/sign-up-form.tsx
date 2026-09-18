@@ -1,120 +1,67 @@
 "use client";
 
-import { cn } from "@/lib/utils";
-import { createClient } from "@/lib/supabase/client";
+import { useActionState, useState } from "react";
+import Link from "next/link";
+import { ArrowRight, Loader2 } from "lucide-react";
+import { signUpAction, type AuthActionState } from "@/app/auth/actions";
+import { FormMessage } from "@/components/auth/form-message";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { PASSWORD_MIN_LENGTH } from "@/lib/auth/validation";
 
-export function SignUpForm({
-  className,
-  ...props
-}: React.ComponentPropsWithoutRef<"div">) {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [repeatPassword, setRepeatPassword] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const router = useRouter();
+const initialState: AuthActionState = {};
 
-  const handleSignUp = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const supabase = createClient();
-    setIsLoading(true);
-    setError(null);
+export function SignUpForm() {
+  const [state, formAction, pending] = useActionState(signUpAction, initialState);
+  const [clientError, setClientError] = useState<string>();
 
-    if (password !== repeatPassword) {
-      setError("Passwords do not match");
-      setIsLoading(false);
+  function validateBeforeSubmit(event: React.FormEvent<HTMLFormElement>) {
+    const formData = new FormData(event.currentTarget);
+    if (formData.get("password") !== formData.get("confirmPassword")) {
+      event.preventDefault();
+      setClientError("Passwords do not match.");
       return;
     }
-
-    try {
-      const { error } = await supabase.auth.signUp({
-        email,
-        password,
-        options: {
-          emailRedirectTo: `${window.location.origin}/protected`,
-        },
-      });
-      if (error) throw error;
-      router.push("/auth/sign-up-success");
-    } catch (error: unknown) {
-      setError(error instanceof Error ? error.message : "An error occurred");
-    } finally {
-      setIsLoading(false);
-    }
-  };
+    setClientError(undefined);
+  }
 
   return (
-    <div className={cn("flex flex-col gap-6", className)} {...props}>
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-2xl">Sign up</CardTitle>
-          <CardDescription>Create a new account</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleSignUp}>
-            <div className="flex flex-col gap-6">
-              <div className="grid gap-2">
-                <Label htmlFor="email">Email</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  placeholder="m@example.com"
-                  required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                />
-              </div>
-              <div className="grid gap-2">
-                <div className="flex items-center">
-                  <Label htmlFor="password">Password</Label>
-                </div>
-                <Input
-                  id="password"
-                  type="password"
-                  required
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                />
-              </div>
-              <div className="grid gap-2">
-                <div className="flex items-center">
-                  <Label htmlFor="repeat-password">Repeat Password</Label>
-                </div>
-                <Input
-                  id="repeat-password"
-                  type="password"
-                  required
-                  value={repeatPassword}
-                  onChange={(e) => setRepeatPassword(e.target.value)}
-                />
-              </div>
-              {error && <p className="text-sm text-red-500">{error}</p>}
-              <Button type="submit" className="w-full" disabled={isLoading}>
-                {isLoading ? "Creating an account..." : "Sign up"}
-              </Button>
-            </div>
-            <div className="mt-4 text-center text-sm">
-              Already have an account?{" "}
-              <Link href="/auth/login" className="underline underline-offset-4">
-                Login
-              </Link>
-            </div>
-          </form>
-        </CardContent>
-      </Card>
+    <div>
+      <p className="text-sm font-semibold text-indigo-600">Get started</p>
+      <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950">Create your account</h1>
+      <p className="mt-2 text-sm leading-6 text-slate-600">Set up your workspace identity in under a minute.</p>
+
+      <form action={formAction} className="mt-7 space-y-4" onSubmit={validateBeforeSubmit}>
+        <div className="space-y-2">
+          <Label htmlFor="fullName">Full name</Label>
+          <Input autoComplete="name" autoFocus className="h-11 bg-white" id="fullName" maxLength={100} minLength={2} name="fullName" placeholder="Alex Morgan" required />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="email">Email address</Label>
+          <Input autoComplete="email" className="h-11 bg-white" id="email" maxLength={254} name="email" placeholder="you@company.com" required type="email" />
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div className="space-y-2">
+            <Label htmlFor="password">Password</Label>
+            <Input aria-describedby="password-help" autoComplete="new-password" className="h-11 bg-white" id="password" maxLength={72} minLength={PASSWORD_MIN_LENGTH} name="password" required type="password" />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="confirmPassword">Confirm password</Label>
+            <Input autoComplete="new-password" className="h-11 bg-white" id="confirmPassword" maxLength={72} minLength={PASSWORD_MIN_LENGTH} name="confirmPassword" required type="password" />
+          </div>
+        </div>
+        <p className="text-xs text-slate-500" id="password-help">Use at least {PASSWORD_MIN_LENGTH} characters.</p>
+        <FormMessage error={clientError ?? state.error} />
+        <Button className="h-11 w-full bg-indigo-600 hover:bg-indigo-500" disabled={pending} type="submit">
+          {pending ? <Loader2 aria-hidden="true" className="animate-spin" /> : <ArrowRight aria-hidden="true" />}
+          {pending ? "Creating account…" : "Create account"}
+        </Button>
+      </form>
+
+      <p className="mt-6 text-center text-sm text-slate-600">
+        Already have an account?{" "}<Link className="font-semibold text-indigo-600 hover:text-indigo-500" href="/auth/login">Sign in</Link>
+      </p>
     </div>
   );
 }

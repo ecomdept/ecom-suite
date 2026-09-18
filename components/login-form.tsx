@@ -1,110 +1,48 @@
 "use client";
 
-import { cn } from "@/lib/utils";
-import { createClient } from "@/lib/supabase/client";
+import { useActionState } from "react";
+import Link from "next/link";
+import { ArrowRight, Loader2 } from "lucide-react";
+import { signInAction, type AuthActionState } from "@/app/auth/actions";
+import { FormMessage } from "@/components/auth/form-message";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useState } from "react";
 
-export function LoginForm({
-  className,
-  ...props
-}: React.ComponentPropsWithoutRef<"div">) {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const router = useRouter();
+const initialState: AuthActionState = {};
 
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const supabase = createClient();
-    setIsLoading(true);
-    setError(null);
-
-    try {
-      const { error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
-      if (error) throw error;
-      // Update this route to redirect to an authenticated route. The user already has an active session.
-      router.push("/protected");
-    } catch (error: unknown) {
-      setError(error instanceof Error ? error.message : "An error occurred");
-    } finally {
-      setIsLoading(false);
-    }
-  };
+export function LoginForm({ next = "/dashboard" }: { next?: string }) {
+  const [state, formAction, pending] = useActionState(signInAction, initialState);
 
   return (
-    <div className={cn("flex flex-col gap-6", className)} {...props}>
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-2xl">Login</CardTitle>
-          <CardDescription>
-            Enter your email below to login to your account
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleLogin}>
-            <div className="flex flex-col gap-6">
-              <div className="grid gap-2">
-                <Label htmlFor="email">Email</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  placeholder="m@example.com"
-                  required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                />
-              </div>
-              <div className="grid gap-2">
-                <div className="flex items-center">
-                  <Label htmlFor="password">Password</Label>
-                  <Link
-                    href="/auth/forgot-password"
-                    className="ml-auto inline-block text-sm underline-offset-4 hover:underline"
-                  >
-                    Forgot your password?
-                  </Link>
-                </div>
-                <Input
-                  id="password"
-                  type="password"
-                  required
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                />
-              </div>
-              {error && <p className="text-sm text-red-500">{error}</p>}
-              <Button type="submit" className="w-full" disabled={isLoading}>
-                {isLoading ? "Logging in..." : "Login"}
-              </Button>
-            </div>
-            <div className="mt-4 text-center text-sm">
-              Don&apos;t have an account?{" "}
-              <Link
-                href="/auth/sign-up"
-                className="underline underline-offset-4"
-              >
-                Sign up
-              </Link>
-            </div>
-          </form>
-        </CardContent>
-      </Card>
+    <div>
+      <p className="text-sm font-semibold text-indigo-600">Welcome back</p>
+      <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950">Sign in to Orbit</h1>
+      <p className="mt-2 text-sm leading-6 text-slate-600">Pick up where your team left off.</p>
+
+      <form action={formAction} className="mt-8 space-y-5">
+        <input name="next" type="hidden" value={next} />
+        <div className="space-y-2">
+          <Label htmlFor="email">Email address</Label>
+          <Input autoComplete="email" autoFocus className="h-11 bg-white" id="email" maxLength={254} name="email" placeholder="you@company.com" required type="email" />
+        </div>
+        <div className="space-y-2">
+          <div className="flex items-center justify-between gap-4">
+            <Label htmlFor="password">Password</Label>
+            <Link className="text-sm font-medium text-indigo-600 hover:text-indigo-500" href="/auth/forgot-password">Forgot password?</Link>
+          </div>
+          <Input autoComplete="current-password" className="h-11 bg-white" id="password" name="password" required type="password" />
+        </div>
+        <FormMessage error={state.error} />
+        <Button className="h-11 w-full bg-indigo-600 hover:bg-indigo-500" disabled={pending} type="submit">
+          {pending ? <Loader2 aria-hidden="true" className="animate-spin" /> : <ArrowRight aria-hidden="true" />}
+          {pending ? "Signing in…" : "Sign in"}
+        </Button>
+      </form>
+
+      <p className="mt-7 text-center text-sm text-slate-600">
+        New to Orbit?{" "}<Link className="font-semibold text-indigo-600 hover:text-indigo-500" href="/auth/sign-up">Create an account</Link>
+      </p>
     </div>
   );
 }

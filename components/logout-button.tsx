@@ -1,17 +1,7 @@
-"use client";
-
-import { createClient } from "@/lib/supabase/client";
+import { LogOut } from "lucide-react";
+import { signOutAction } from "@/app/auth/actions";
 import { Button } from "@/components/ui/button";
-import { useRouter } from "next/navigation";
 
 export function LogoutButton() {
-  const router = useRouter();
-
-  const logout = async () => {
-    const supabase = createClient();
-    await supabase.auth.signOut();
-    router.push("/auth/login");
-  };
-
-  return <Button onClick={logout}>Logout</Button>;
+  return <form action={signOutAction}><Button className="gap-2" type="submit" variant="outline"><LogOut aria-hidden="true" className="size-4" />Sign out</Button></form>;
 }

@@ -1,78 +1,51 @@
 "use client";
 
-import { cn } from "@/lib/utils";
-import { createClient } from "@/lib/supabase/client";
+import { useActionState, useState } from "react";
+import Link from "next/link";
+import { KeyRound, Loader2 } from "lucide-react";
+import { updatePasswordAction, type AuthActionState } from "@/app/auth/actions";
+import { FormMessage } from "@/components/auth/form-message";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { PASSWORD_MIN_LENGTH } from "@/lib/auth/validation";
 
-export function UpdatePasswordForm({
-  className,
-  ...props
-}: React.ComponentPropsWithoutRef<"div">) {
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const router = useRouter();
+const initialState: AuthActionState = {};
 
-  const handleForgotPassword = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const supabase = createClient();
-    setIsLoading(true);
-    setError(null);
+export function UpdatePasswordForm() {
+  const [state, formAction, pending] = useActionState(updatePasswordAction, initialState);
+  const [clientError, setClientError] = useState<string>();
 
-    try {
-      const { error } = await supabase.auth.updateUser({ password });
-      if (error) throw error;
-      // Update this route to redirect to an authenticated route. The user already has an active session.
-      router.push("/protected");
-    } catch (error: unknown) {
-      setError(error instanceof Error ? error.message : "An error occurred");
-    } finally {
-      setIsLoading(false);
+  function validateBeforeSubmit(event: React.FormEvent<HTMLFormElement>) {
+    const formData = new FormData(event.currentTarget);
+    if (formData.get("password") !== formData.get("confirmPassword")) {
+      event.preventDefault();
+      setClientError("Passwords do not match.");
+      return;
     }
-  };
+    setClientError(undefined);
+  }
 
   return (
-    <div className={cn("flex flex-col gap-6", className)} {...props}>
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-2xl">Reset Your Password</CardTitle>
-          <CardDescription>
-            Please enter your new password below.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleForgotPassword}>
-            <div className="flex flex-col gap-6">
-              <div className="grid gap-2">
-                <Label htmlFor="password">New password</Label>
-                <Input
-                  id="password"
-                  type="password"
-                  placeholder="New password"
-                  required
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                />
-              </div>
-              {error && <p className="text-sm text-red-500">{error}</p>}
-              <Button type="submit" className="w-full" disabled={isLoading}>
-                {isLoading ? "Saving..." : "Save new password"}
-              </Button>
-            </div>
-          </form>
-        </CardContent>
-      </Card>
+    <div>
+      <span className="grid size-12 place-items-center rounded-xl bg-indigo-50 text-indigo-600"><KeyRound aria-hidden="true" /></span>
+      <h1 className="mt-5 text-3xl font-semibold tracking-tight text-slate-950">Choose a new password</h1>
+      <p className="mt-2 text-sm leading-6 text-slate-600">Make it memorable and at least {PASSWORD_MIN_LENGTH} characters long.</p>
+      {state.success ? (
+        <div className="mt-8 space-y-5">
+          <FormMessage success={state.success} />
+          <Button asChild className="h-11 w-full bg-indigo-600 hover:bg-indigo-500"><Link href="/dashboard">Continue to dashboard</Link></Button>
+        </div>
+      ) : (
+        <form action={formAction} className="mt-8 space-y-5" onSubmit={validateBeforeSubmit}>
+          <div className="space-y-2"><Label htmlFor="password">New password</Label><Input autoComplete="new-password" autoFocus className="h-11 bg-white" id="password" maxLength={72} minLength={PASSWORD_MIN_LENGTH} name="password" required type="password" /></div>
+          <div className="space-y-2"><Label htmlFor="confirmPassword">Confirm new password</Label><Input autoComplete="new-password" className="h-11 bg-white" id="confirmPassword" maxLength={72} minLength={PASSWORD_MIN_LENGTH} name="confirmPassword" required type="password" /></div>
+          <FormMessage error={clientError ?? state.error} />
+          <Button className="h-11 w-full bg-indigo-600 hover:bg-indigo-500" disabled={pending} type="submit">
+            {pending && <Loader2 aria-hidden="true" className="animate-spin" />}{pending ? "Updating password…" : "Update password"}
+          </Button>
+        </form>
+      )}
     </div>
   );
 }

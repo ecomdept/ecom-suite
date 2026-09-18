@@ -1,51 +1,17 @@
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Suspense } from "react";
+import Link from "next/link";
+import { CircleAlert } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
-async function ErrorContent({
-  searchParams,
-}: {
-  searchParams: Promise<{ error: string }>;
-}) {
-  const params = await searchParams;
+export const instant = false;
 
+export default async function AuthErrorPage({ searchParams }: { searchParams: Promise<{ error?: string }> }) {
+  const { error } = await searchParams;
   return (
-    <>
-      {params?.error ? (
-        <p className="text-sm text-muted-foreground">
-          Code error: {params.error}
-        </p>
-      ) : (
-        <p className="text-sm text-muted-foreground">
-          An unspecified error occurred.
-        </p>
-      )}
-    </>
-  );
-}
-
-export default function Page({
-  searchParams,
-}: {
-  searchParams: Promise<{ error: string }>;
-}) {
-  return (
-    <div className="flex min-h-svh w-full items-center justify-center p-6 md:p-10">
-      <div className="w-full max-w-sm">
-        <div className="flex flex-col gap-6">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-2xl">
-                Sorry, something went wrong.
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <Suspense>
-                <ErrorContent searchParams={searchParams} />
-              </Suspense>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
+    <div className="text-center">
+      <span className="mx-auto grid size-14 place-items-center rounded-2xl bg-red-50 text-red-600"><CircleAlert aria-hidden="true" className="size-7" /></span>
+      <h1 className="mt-5 text-3xl font-semibold tracking-tight text-slate-950">That link didn’t work</h1>
+      <p className="mx-auto mt-3 max-w-sm text-sm leading-6 text-slate-600">{error ?? "The authentication link is invalid or has expired. Please try again."}</p>
+      <Button asChild className="mt-7 h-11 w-full"><Link href="/auth/login">Return to sign in</Link></Button>
     </div>
   );
 }
