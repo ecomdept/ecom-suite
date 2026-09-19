@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Geist } from "next/font/google";
+import { Bodoni_Moda, Geist } from "next/font/google";
 import { ThemeProvider } from "next-themes";
 import "./globals.css";
 
@@ -10,14 +10,20 @@ const defaultUrl = process.env.VERCEL_URL
 export const metadata: Metadata = {
   metadataBase: new URL(defaultUrl),
   title: {
-    default: "Orbit",
-    template: "%s | Orbit",
+    default: "Ecom Department Workroom",
+    template: "%s | Ecom Department",
   },
-  description: "A focused workspace for planning and delivering great work.",
+  description: "The Ecom Department client and delivery workroom.",
 };
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
+  display: "swap",
+  subsets: ["latin"],
+});
+
+const displaySerif = Bodoni_Moda({
+  variable: "--font-display",
   display: "swap",
   subsets: ["latin"],
 });
@@ -29,11 +35,11 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className={`${geistSans.className} antialiased`}>
+      <body className={`${geistSans.className} ${displaySerif.variable} antialiased`}>
         <ThemeProvider
           attribute="class"
-          defaultTheme="system"
-          enableSystem
+          defaultTheme="light"
+          enableSystem={false}
           disableTransitionOnChange
         >
           {children}

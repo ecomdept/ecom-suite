@@ -16,9 +16,9 @@ export function LoginForm({ next = "/dashboard" }: { next?: string }) {
 
   return (
     <div>
-      <p className="text-sm font-semibold text-indigo-600">Welcome back</p>
-      <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950">Sign in to Orbit</h1>
-      <p className="mt-2 text-sm leading-6 text-slate-600">Pick up where your team left off.</p>
+      <p className="eyebrow">Private client access</p>
+      <h1 className="mt-3 text-4xl leading-tight text-slate-950">Welcome to your workroom.</h1>
+      <p className="mt-3 text-sm leading-6 text-slate-600">Review progress, request work, and stay close to delivery.</p>
 
       <form action={formAction} className="mt-8 space-y-5">
         <input name="next" type="hidden" value={next} />
@@ -29,19 +29,19 @@ export function LoginForm({ next = "/dashboard" }: { next?: string }) {
         <div className="space-y-2">
           <div className="flex items-center justify-between gap-4">
             <Label htmlFor="password">Password</Label>
-            <Link className="text-sm font-medium text-indigo-600 hover:text-indigo-500" href="/auth/forgot-password">Forgot password?</Link>
+            <Link className="text-sm font-medium text-pink-600 hover:text-pink-500" href="/auth/forgot-password">Forgot password?</Link>
           </div>
           <Input autoComplete="current-password" className="h-11 bg-white" id="password" name="password" required type="password" />
         </div>
         <FormMessage error={state.error} />
-        <Button className="h-11 w-full bg-indigo-600 hover:bg-indigo-500" disabled={pending} type="submit">
+        <Button className="h-11 w-full bg-pink-600 hover:bg-pink-500" disabled={pending} type="submit">
           {pending ? <Loader2 aria-hidden="true" className="animate-spin" /> : <ArrowRight aria-hidden="true" />}
           {pending ? "Signing in…" : "Sign in"}
         </Button>
       </form>
 
-      <p className="mt-7 text-center text-sm text-slate-600">
-        New to Orbit?{" "}<Link className="font-semibold text-indigo-600 hover:text-indigo-500" href="/auth/sign-up">Create an account</Link>
+      <p className="mt-7 text-center text-sm text-slate-500">
+        Accounts are invitation-only. Contact your administrator if you need access.
       </p>
     </div>
   );

@@ -4,7 +4,6 @@ import { createClient } from "@/lib/supabase/server";
 import {
   getSafePath,
   validateEmail,
-  validateFullName,
   validatePassword,
 } from "@/lib/auth/validation";
 import { headers } from "next/headers";
@@ -52,39 +51,6 @@ export async function signInAction(
   redirect(getSafePath(formData.get("next")));
 }
 
-export async function signUpAction(
-  previousState: AuthActionState,
-  formData: FormData,
-): Promise<AuthActionState> {
-  void previousState;
-  const fullName = getString(formData, "fullName").trim();
-  const email = getString(formData, "email").trim().toLowerCase();
-  const password = getString(formData, "password");
-  const confirmPassword = getString(formData, "confirmPassword");
-
-  const validationError =
-    validateFullName(fullName) ?? validateEmail(email) ?? validatePassword(password);
-
-  if (validationError) return { error: validationError };
-  if (password !== confirmPassword) return { error: "Passwords do not match." };
-
-  const supabase = await createClient();
-  const origin = await getOrigin();
-  const { data, error } = await supabase.auth.signUp({
-    email,
-    password,
-    options: {
-      data: { full_name: fullName },
-      emailRedirectTo: `${origin}/auth/confirm?next=/dashboard`,
-    },
-  });
-
-  if (error) return { error: error.message };
-
-  if (data.session) redirect("/dashboard");
-  redirect("/auth/sign-up-success");
-}
-
 export async function forgotPasswordAction(
   previousState: AuthActionState,
   formData: FormData,
@@ -116,6 +82,7 @@ export async function updatePasswordAction(
   void previousState;
   const password = getString(formData, "password");
   const confirmPassword = getString(formData, "confirmPassword");
+  const flow = getString(formData, "flow");
   const passwordError = validatePassword(password);
 
   if (passwordError) return { error: passwordError };
@@ -131,7 +98,12 @@ export async function updatePasswordAction(
   const { error } = await supabase.auth.updateUser({ password });
   if (error) return { error: error.message };
 
-  return { success: "Your password has been updated. You can continue to your dashboard." };
+  return {
+    success:
+      flow === "invite"
+        ? "Your account is ready. You can now continue to your dashboard."
+        : "Your password has been updated. You can continue to your dashboard.",
+  };
 }
 
 export async function signOutAction() {
