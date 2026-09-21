@@ -1,15 +1,21 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Maximize2, Minimize2, Plus, X } from "lucide-react";
 import { CreateTicketForm } from "@/components/projects/create-ticket-form";
 import type { TicketMemberOption } from "@/components/projects/create-ticket-form";
 import { Button } from "@/components/ui/button";
 
-export function TicketComposer({ projectId, clientRequest = false, members = [] }: { projectId: string; clientRequest?: boolean; members?: TicketMemberOption[] }) {
+export function TicketComposer({ projectId, clientRequest = false, members = [], autoOpen = false, canPlan = false }: { projectId: string; clientRequest?: boolean; members?: TicketMemberOption[]; autoOpen?: boolean; canPlan?: boolean }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [isOpen, setIsOpen] = useState(false);
   const [isFullScreen, setIsFullScreen] = useState(false);
+
+  useEffect(() => {
+    if (!autoOpen || dialogRef.current?.open) return;
+    setIsOpen(true);
+    dialogRef.current?.showModal();
+  }, [autoOpen]);
 
   function openDialog() {
     setIsOpen(true);
@@ -25,7 +31,7 @@ export function TicketComposer({ projectId, clientRequest = false, members = [] 
   return (
     <>
       <Button className="h-10 bg-pink-600 hover:bg-pink-500" onClick={openDialog} type="button">
-        <Plus aria-hidden="true" />{clientRequest ? "Request task" : "Create ticket"}
+        <Plus aria-hidden="true" />{clientRequest ? "Submit a request" : "Create ticket"}
       </Button>
 
       <dialog
@@ -48,7 +54,7 @@ export function TicketComposer({ projectId, clientRequest = false, members = [] 
           <div className="flex items-center justify-between gap-4 border-b border-stone-100 px-5 py-4 sm:px-6">
             <div>
               <p className="text-xs font-semibold uppercase tracking-wider text-pink-600">{clientRequest ? "Client request" : "New work item"}</p>
-              <h2 className="mt-1 text-xl font-semibold" id="create-ticket-title">{clientRequest ? "Request a new task" : "Create ticket"}</h2>
+              <h2 className="mt-1 text-xl font-semibold" id="create-ticket-title">{clientRequest ? "How can we help?" : "Create ticket"}</h2>
             </div>
             <div className="flex items-center gap-1">
               <Button
@@ -67,7 +73,7 @@ export function TicketComposer({ projectId, clientRequest = false, members = [] 
             </div>
           </div>
           <div className={`overflow-y-auto p-5 sm:p-6 ${isFullScreen ? "mx-auto w-full max-w-4xl flex-1 py-8 sm:py-12" : ""}`}>
-            {isOpen && <CreateTicketForm clientRequest={clientRequest} members={members} onCreated={closeDialog} projectId={projectId} />}
+            {isOpen && <CreateTicketForm canPlan={canPlan} clientRequest={clientRequest} members={members} onCreated={closeDialog} projectId={projectId} />}
           </div>
         </div>
       </dialog>

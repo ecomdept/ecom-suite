@@ -122,6 +122,7 @@ export async function createTicketAction(
   const expectedBehavior = getOptionalString(formData, "expectedBehavior");
   const actualBehavior = getOptionalString(formData, "actualBehavior");
   const affectedPlatforms = [...new Set(formData.getAll("affectedPlatforms").map(String).filter(isTicketPlatform))];
+  const referenceUrl = getOptionalString(formData, "referenceUrl");
   const previewUrl = getOptionalString(formData, "previewUrl");
   const repositoryUrl = getOptionalString(formData, "repositoryUrl");
   const designUrl = getOptionalString(formData, "designUrl");
@@ -143,19 +144,14 @@ export async function createTicketAction(
     validateLongText(expectedBehavior ?? "", "Expected behavior", 3000) ??
     validateLongText(actualBehavior ?? "", "Actual behavior", 3000) ??
     validateLongText(devNotes ?? "", "Development notes", 10000) ??
+    validateOptionalUrl(referenceUrl ?? "", "Reference URL") ??
     validateOptionalUrl(previewUrl ?? "", "Preview URL") ??
     validateOptionalUrl(repositoryUrl ?? "", "GitHub repository URL") ??
     validateOptionalUrl(designUrl ?? "", "Design URL");
   if (detailError) return { error: detailError };
-  if (ticketType === "bug" && (!reproductionSteps || !expectedBehavior || !actualBehavior || !affectedPlatforms.length)) {
-    return { error: "Bug reports require a platform, reproduction steps, expected behavior, and actual behavior." };
-  }
-  if (ticketType !== "bug" && !acceptanceCriteria) {
-    return { error: "Feature tickets require acceptance criteria." };
-  }
-
   const { supabase, userId, role } = await getCurrentRole();
   const isManager = role === "admin" || role === "project_manager";
+  const isAgencyMember = Boolean(role && role !== "client");
 
   if (isManager && assigneeId) {
     const { data: membership } = await supabase
@@ -178,17 +174,23 @@ export async function createTicketAction(
     expected_behavior: ticketType === "bug" ? expectedBehavior : null,
     actual_behavior: ticketType === "bug" ? actualBehavior : null,
     affected_platforms: ticketType === "bug" ? affectedPlatforms : [],
-    preview_url: previewUrl,
-    repository_url: isManager ? repositoryUrl : null,
+    reference_url: referenceUrl,
+    preview_url: isAgencyMember ? previewUrl : null,
+    repository_url: isAgencyMember ? repositoryUrl : null,
     design_url: designUrl,
-    dev_notes: isManager ? devNotes : null,
+    dev_notes: isAgencyMember ? devNotes : null,
     assignee_id: isManager ? assigneeId : null,
     due_date: isManager ? dueDate : null,
     estimated_hours: isManager ? estimatedHours ?? 0 : 0,
     created_by: userId,
   });
 
-  if (error) return { error: "The ticket could not be created for this project." };
+  if (error) {
+    if (error.code === "PGRST204" || error.code === "42703" || error.message.toLowerCase().includes("reference_url")) {
+      return { error: "Ticket references require the latest database migration." };
+    }
+    return { error: "The ticket could not be created for this project." };
+  }
 
   revalidatePath(`/projects/${projectId}`);
   revalidatePath("/my-tasks");
@@ -205,17 +207,21 @@ export async function moveTicketAction(formData: FormData): Promise<ProjectActio
   }
 
   const { supabase, role } = await getCurrentRole();
-  if (role !== "admin" && role !== "project_manager") {
+  if (!role || role === "client") {
     return { error: "You do not have permission to move this ticket." };
   }
 
-  const { error } = await supabase
-    .from("tickets")
-    .update({ status })
-    .eq("id", ticketId)
-    .eq("project_id", projectId);
+  const { error } = await supabase.rpc("move_ticket_status", {
+    target_ticket_id: ticketId,
+    next_status: status,
+  });
 
-  if (error) return { error: "The ticket could not be moved." };
+  if (error) {
+    if (error.code === "PGRST202" || error.message.toLowerCase().includes("move_ticket_status")) {
+      return { error: "Ticket movement requires the latest database migration." };
+    }
+    return { error: "The ticket could not be moved." };
+  }
 
   revalidatePath(`/projects/${projectId}`);
   revalidatePath("/my-tasks");
@@ -423,6 +429,7 @@ export async function updateTicketDetailsAction(
   const expectedBehavior = getOptionalString(formData, "expectedBehavior");
   const actualBehavior = getOptionalString(formData, "actualBehavior");
   const affectedPlatforms = [...new Set(formData.getAll("affectedPlatforms").map(String).filter(isTicketPlatform))];
+  const referenceUrl = getOptionalString(formData, "referenceUrl");
   const previewUrl = getOptionalString(formData, "previewUrl");
   const repositoryUrl = getOptionalString(formData, "repositoryUrl");
   const designUrl = getOptionalString(formData, "designUrl");
@@ -442,15 +449,11 @@ export async function updateTicketDetailsAction(
     validateLongText(expectedBehavior ?? "", "Expected behavior", 3000) ??
     validateLongText(actualBehavior ?? "", "Actual behavior", 3000) ??
     validateLongText(devNotes ?? "", "Development notes", 10000) ??
+    validateOptionalUrl(referenceUrl ?? "", "Reference URL") ??
     validateOptionalUrl(previewUrl ?? "", "Preview URL") ??
     validateOptionalUrl(repositoryUrl ?? "", "GitHub repository URL") ??
     validateOptionalUrl(designUrl ?? "", "Design URL");
   if (validationError) return { error: validationError };
-  if (ticketType === "bug" && (!reproductionSteps || !expectedBehavior || !actualBehavior || !affectedPlatforms.length)) {
-    return { error: "Bug reports require a platform, reproduction steps, expected behavior, and actual behavior." };
-  }
-  if (ticketType !== "bug" && !acceptanceCriteria) return { error: "Feature tickets require acceptance criteria." };
-
   const { supabase, role } = await getCurrentRole();
   if (role !== "admin" && role !== "project_manager") {
     return { error: "Only administrators and project managers can edit ticket details." };
@@ -478,6 +481,7 @@ export async function updateTicketDetailsAction(
       expected_behavior: ticketType === "bug" ? expectedBehavior : null,
       actual_behavior: ticketType === "bug" ? actualBehavior : null,
       affected_platforms: ticketType === "bug" ? affectedPlatforms : [],
+      reference_url: referenceUrl,
       preview_url: previewUrl,
       repository_url: repositoryUrl,
       design_url: designUrl,
@@ -487,7 +491,12 @@ export async function updateTicketDetailsAction(
     })
     .eq("id", ticketId)
     .eq("project_id", projectId);
-  if (error) return { error: "Ticket details could not be updated." };
+  if (error) {
+    if (error.code === "PGRST204" || error.code === "42703" || error.message.toLowerCase().includes("reference_url")) {
+      return { error: "Ticket references require the latest database migration." };
+    }
+    return { error: "Ticket details could not be updated." };
+  }
 
   revalidatePath(`/projects/${projectId}`);
   revalidatePath(`/projects/${projectId}/tickets/${ticketId}`);

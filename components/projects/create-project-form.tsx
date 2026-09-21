@@ -10,6 +10,7 @@ import { FormMessage } from "@/components/auth/form-message";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { RichTextEditor } from "@/components/ui/rich-text-editor";
 
 export type ProjectMemberOption = {
   id: string;
@@ -46,13 +47,7 @@ export function CreateProjectForm({ users }: { users: ProjectMemberOption[] }) {
       </div>
       <div className="space-y-2">
         <Label htmlFor="project-description">Description</Label>
-        <textarea
-          className="min-h-24 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm outline-none placeholder:text-muted-foreground focus-visible:ring-1 focus-visible:ring-ring"
-          id="project-description"
-          maxLength={2000}
-          name="description"
-          placeholder="What is this project responsible for?"
-        />
+        <RichTextEditor id="project-description" maxLength={2000} minHeight="min-h-24" name="description" placeholder="What is this project responsible for?" />
       </div>
 
       {users.length > 0 && (

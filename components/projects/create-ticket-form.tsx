@@ -10,6 +10,7 @@ import { FormMessage } from "@/components/auth/form-message";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { RichTextEditor } from "@/components/ui/rich-text-editor";
 import type { TicketType } from "@/lib/projects/validation";
 
 export type TicketMemberOption = { id: string; name: string };
@@ -20,11 +21,13 @@ export function CreateTicketForm({
   projectId,
   onCreated,
   clientRequest = false,
+  canPlan = false,
   members = [],
 }: {
   projectId: string;
   onCreated?: () => void;
   clientRequest?: boolean;
+  canPlan?: boolean;
   members?: TicketMemberOption[];
 }) {
   const [state, formAction, pending] = useActionState(createTicketAction, initialState);
@@ -38,60 +41,61 @@ export function CreateTicketForm({
     <form action={formAction} className="grid gap-4">
       <input name="projectId" type="hidden" value={projectId} />
       <div className="space-y-2">
-        <Label htmlFor="ticket-title">Ticket title</Label>
-        <Input autoFocus id="ticket-title" maxLength={140} minLength={2} name="title" placeholder={ticketType === "bug" ? "Checkout button fails on mobile" : "Add checkout validation"} required />
+        <Label htmlFor="ticket-title">{clientRequest ? "What do you need?" : "Ticket title"} <span className="text-pink-600">*</span></Label>
+        <Input autoFocus id="ticket-title" maxLength={140} minLength={2} name="title" placeholder={ticketType === "bug" ? "Checkout button fails on mobile" : clientRequest ? "A short, clear summary of your request" : "Add checkout validation"} required />
       </div>
       <div className="space-y-2">
-        <Label htmlFor="ticket-type">Work type</Label>
+        <Label htmlFor="ticket-type">{clientRequest ? "Request type" : "Work type"}</Label>
         <select className="flex h-10 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-sm outline-none focus-visible:ring-1 focus-visible:ring-ring" id="ticket-type" name="ticketType" onChange={(event) => setTicketType(event.target.value as TicketType)} value={ticketType}>
           <option value="new_feature">New feature</option>
           <option value="feature_update">Update existing feature</option>
           <option value="bug">Bug</option>
         </select>
         <p className="text-xs text-slate-500">
-          {ticketType === "bug" ? "Report where the issue happens and provide exact reproduction steps." : ticketType === "feature_update" ? "Explain the current behavior, the requested change, and how success will be verified." : "Describe the user need, desired outcome, and acceptance criteria."}
+          {ticketType === "bug" ? "Share what went wrong. Add the extra details you know—we can help investigate the rest." : ticketType === "feature_update" ? "Tell us what should change about something that already exists." : "Describe a new capability, page, campaign, or experience."}
         </p>
       </div>
       <div className="space-y-2">
         <Label htmlFor="ticket-description">{ticketType === "bug" ? "Issue summary" : "Description and user need"}</Label>
-        <textarea
-          className="min-h-24 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm outline-none placeholder:text-muted-foreground focus-visible:ring-1 focus-visible:ring-ring"
+        <RichTextEditor
           id="ticket-description"
           maxLength={2000}
           name="description"
           placeholder={ticketType === "bug" ? "Summarize the issue, its impact, and when it started." : ticketType === "feature_update" ? "Describe the existing feature and what needs to change." : "As a user, I want… so that…"}
         />
+        <p className="text-xs text-slate-500">Optional, but context helps us scope and respond faster.</p>
       </div>
       {ticketType === "bug" ? (
         <div className="grid gap-4 rounded-xl border border-red-100 bg-red-50/50 p-4">
           <fieldset className="space-y-2"><legend className="text-sm font-medium">Affected platform</legend><div className="flex flex-wrap gap-4">{["desktop", "mobile", "tablet"].map((platform) => <label className="flex items-center gap-2 text-sm capitalize" key={platform}><input className="size-4 rounded border-slate-300" name="affectedPlatforms" type="checkbox" value={platform} />{platform}</label>)}</div></fieldset>
-          <div className="space-y-2"><Label htmlFor="ticket-reproduction">Steps to reproduce</Label><textarea className="min-h-28 w-full rounded-md border border-input bg-white px-3 py-2 text-sm shadow-sm outline-none focus-visible:ring-1 focus-visible:ring-ring" id="ticket-reproduction" maxLength={5000} name="reproductionSteps" placeholder={"1. Open…\n2. Select…\n3. Observe…"} required /></div>
-          <div className="grid gap-4 sm:grid-cols-2"><div className="space-y-2"><Label htmlFor="ticket-expected">Expected behavior</Label><textarea className="min-h-24 w-full rounded-md border border-input bg-white px-3 py-2 text-sm shadow-sm outline-none focus-visible:ring-1 focus-visible:ring-ring" id="ticket-expected" maxLength={3000} name="expectedBehavior" required /></div><div className="space-y-2"><Label htmlFor="ticket-actual">Actual behavior</Label><textarea className="min-h-24 w-full rounded-md border border-input bg-white px-3 py-2 text-sm shadow-sm outline-none focus-visible:ring-1 focus-visible:ring-ring" id="ticket-actual" maxLength={3000} name="actualBehavior" required /></div></div>
+          <div className="space-y-2"><Label htmlFor="ticket-reproduction">Steps to reproduce <span className="font-normal text-slate-400">(optional)</span></Label><RichTextEditor id="ticket-reproduction" maxLength={5000} name="reproductionSteps" placeholder={"1. Open…\n2. Select…\n3. Observe…"} /></div>
+          <div className="grid gap-4 sm:grid-cols-2"><div className="space-y-2"><Label htmlFor="ticket-expected">What did you expect? <span className="font-normal text-slate-400">(optional)</span></Label><RichTextEditor id="ticket-expected" maxLength={3000} minHeight="min-h-24" name="expectedBehavior" /></div><div className="space-y-2"><Label htmlFor="ticket-actual">What happened instead? <span className="font-normal text-slate-400">(optional)</span></Label><RichTextEditor id="ticket-actual" maxLength={3000} minHeight="min-h-24" name="actualBehavior" /></div></div>
         </div>
       ) : (
-        <div className="space-y-2"><Label htmlFor="ticket-acceptance">Acceptance criteria</Label><textarea className="min-h-28 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm outline-none focus-visible:ring-1 focus-visible:ring-ring" id="ticket-acceptance" maxLength={5000} name="acceptanceCriteria" placeholder={"- Given… when… then…\n- The user can…\n- The feature handles…"} required /></div>
+        <div className="space-y-2"><Label htmlFor="ticket-acceptance">{clientRequest ? "What would a successful result look like?" : "Acceptance criteria"} <span className="font-normal text-slate-400">(optional)</span></Label><RichTextEditor id="ticket-acceptance" maxLength={5000} name="acceptanceCriteria" placeholder={clientRequest ? "Describe the outcome you want to review or approve." : "- Given… when… then…\n- The user can…\n- The feature handles…"} /></div>
       )}
       <div className="space-y-2">
-        <Label htmlFor="ticket-priority">Priority</Label>
+        <Label htmlFor="ticket-priority">{clientRequest ? "Business urgency" : "Priority"}</Label>
         <select className="flex h-10 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-sm outline-none focus-visible:ring-1 focus-visible:ring-ring" defaultValue="medium" id="ticket-priority" name="priority">
-          <option value="low">Low</option>
-          <option value="medium">Medium</option>
-          <option value="high">High</option>
+          <option value="low">{clientRequest ? "Flexible" : "Low"}</option>
+          <option value="medium">{clientRequest ? "Normal" : "Medium"}</option>
+          <option value="high">{clientRequest ? "Time-sensitive" : "High"}</option>
         </select>
+        {clientRequest && <p className="text-xs text-slate-500">We’ll confirm final priority and timing after reviewing the request.</p>}
       </div>
       <fieldset className="grid gap-4 rounded-xl border border-stone-200 p-4 sm:grid-cols-2">
-        <legend className="px-1 text-sm font-medium">References</legend>
-        <div className="space-y-2"><Label htmlFor="ticket-preview-url">Preview or affected page</Label><Input id="ticket-preview-url" maxLength={2000} name="previewUrl" placeholder="https://…" type="url" /></div>
+        <legend className="px-1 text-sm font-medium">{clientRequest ? "Helpful links (optional)" : "References and delivery links"}</legend>
+        <div className="space-y-2"><Label htmlFor="ticket-reference-url">Reference link</Label><Input id="ticket-reference-url" maxLength={2000} name="referenceUrl" placeholder={clientRequest ? "Page, brief, example, or Loom URL" : "https://…"} type="url" /></div>
         <div className="space-y-2"><Label htmlFor="ticket-design-url">Design link</Label><Input id="ticket-design-url" maxLength={2000} name="designUrl" placeholder="https://figma.com/…" type="url" /></div>
-        {!clientRequest && <div className="space-y-2 sm:col-span-2"><Label htmlFor="ticket-repository-url">GitHub repository</Label><Input id="ticket-repository-url" maxLength={2000} name="repositoryUrl" placeholder="https://github.com/…" type="url" /></div>}
+        {!clientRequest && <><div className="space-y-2"><Label htmlFor="ticket-preview-url">Preview or staging URL</Label><Input id="ticket-preview-url" maxLength={2000} name="previewUrl" placeholder="https://…" type="url" /></div><div className="space-y-2"><Label htmlFor="ticket-repository-url">GitHub repository</Label><Input id="ticket-repository-url" maxLength={2000} name="repositoryUrl" placeholder="https://github.com/…" type="url" /></div></>}
       </fieldset>
-      {!clientRequest && (
+      {!clientRequest && canPlan && (
         <fieldset className="grid gap-4 rounded-xl border border-stone-200 p-4 sm:grid-cols-3">
           <legend className="px-1 text-sm font-medium">Planning</legend>
           <div className="space-y-2"><Label htmlFor="ticket-assignee">Assignee</Label><select className="flex h-10 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-sm outline-none focus-visible:ring-1 focus-visible:ring-ring" defaultValue="" id="ticket-assignee" name="assigneeId"><option value="">Unassigned</option>{members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}</select></div>
           <div className="space-y-2"><Label htmlFor="ticket-due-date">Due date</Label><Input id="ticket-due-date" name="dueDate" type="date" /></div>
           <div className="space-y-2"><Label htmlFor="ticket-estimated-hours">Estimated hours</Label><Input id="ticket-estimated-hours" min="0" name="estimatedHours" placeholder="2.5" step="0.25" type="number" /></div>
-          <div className="space-y-2 sm:col-span-3"><Label htmlFor="ticket-dev-notes">Development notes</Label><textarea className="min-h-24 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm outline-none focus-visible:ring-1 focus-visible:ring-ring" id="ticket-dev-notes" maxLength={10000} name="devNotes" placeholder="Implementation considerations, dependencies, technical constraints…" /></div>
+          <div className="space-y-2 sm:col-span-3"><Label htmlFor="ticket-dev-notes">Development notes</Label><RichTextEditor id="ticket-dev-notes" maxLength={10000} name="devNotes" placeholder="Implementation considerations, dependencies, technical constraints…" /></div>
         </fieldset>
       )}
       <FormMessage error={state.error} success={state.success} />

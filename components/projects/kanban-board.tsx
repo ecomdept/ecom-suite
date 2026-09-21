@@ -5,6 +5,7 @@ import { useEffect, useState, useTransition } from "react";
 import { ArrowLeft, ArrowRight, CircleDot, GripVertical, MessageSquare } from "lucide-react";
 import { moveTicketAction } from "@/app/projects/actions";
 import { Button } from "@/components/ui/button";
+import { markdownToPlainText } from "@/components/ui/markdown-content";
 import type { TicketPriority, TicketStatus, TicketType } from "@/lib/projects/validation";
 
 type Ticket = {
@@ -140,8 +141,8 @@ export function KanbanBoard({ projectId, tickets: initialTickets, canManage, cli
                       </div>
                       <span className={`shrink-0 rounded-full px-2 py-1 text-[10px] font-semibold uppercase tracking-wide ${priorityClasses[ticket.priority]}`}>{ticket.priority}</span>
                     </div>
-                    {ticket.description && <p className="mt-2 line-clamp-3 text-sm leading-5 text-slate-600">{ticket.description}</p>}
-                    {(Number(ticket.estimated_hours) > 0 || Number(ticket.logged_hours) > 0) && (
+                    {ticket.description && <p className="mt-2 line-clamp-3 text-sm leading-5 text-slate-600">{markdownToPlainText(ticket.description)}</p>}
+                    {!clientView && (Number(ticket.estimated_hours) > 0 || Number(ticket.logged_hours) > 0) && (
                       <div className="mt-3 flex gap-3 text-[11px] text-slate-500">
                         {Number(ticket.estimated_hours) > 0 && <span>{Number(ticket.estimated_hours).toFixed(1)}h estimated</span>}
                         {Number(ticket.logged_hours) > 0 && <span>{Number(ticket.logged_hours).toFixed(1)}h logged</span>}
@@ -161,7 +162,7 @@ export function KanbanBoard({ projectId, tickets: initialTickets, canManage, cli
                     </div>
                   </article>
                 ))}
-                {columnTickets.length === 0 && <div className="rounded-xl border border-dashed border-slate-300 px-4 py-8 text-center text-sm text-slate-400">Drop tickets here</div>}
+                {columnTickets.length === 0 && <div className="rounded-xl border border-dashed border-slate-300 px-4 py-8 text-center text-sm text-slate-400">{clientView ? "No requests here yet" : "Drop tickets here"}</div>}
               </div>
             </div>
           );

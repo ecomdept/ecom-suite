@@ -9,6 +9,7 @@ import { ProjectAnalytics } from "@/components/projects/project-analytics";
 import { ProjectAdminSettings } from "@/components/projects/project-admin-settings";
 import type { ProjectMemberOption } from "@/components/projects/create-project-form";
 import { Button } from "@/components/ui/button";
+import { markdownToPlainText } from "@/components/ui/markdown-content";
 import { requireUser } from "@/lib/auth/session";
 import { isTicketPriority, isTicketStatus, isTicketType } from "@/lib/projects/validation";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -16,8 +17,9 @@ import { isAppRole, ROLE_LABELS } from "@/lib/auth/roles";
 
 export const instant = false;
 
-export default async function ProjectBoardPage({ params }: { params: Promise<{ projectId: string }> }) {
+export default async function ProjectBoardPage({ params, searchParams }: { params: Promise<{ projectId: string }>; searchParams: Promise<{ new?: string }> }) {
   const { projectId } = await params;
+  const query = await searchParams;
   const { supabase, claims } = await requireUser();
   const userId = typeof claims.sub === "string" ? claims.sub : "";
   const [{ data: project }, { data: tickets }, { data: roleRecord }, { data: memberships }] = await Promise.all([
@@ -37,6 +39,7 @@ export default async function ProjectBoardPage({ params }: { params: Promise<{ p
     name: memberProfiles?.find((profile) => profile.id === memberId)?.full_name || `Member ${memberId.slice(0, 8)}`,
   }));
   const canManage = roleRecord?.role === "admin" || roleRecord?.role === "project_manager";
+  const canMoveTickets = canManage || roleRecord?.role === "developer" || roleRecord?.role === "designer";
   const canCreateTicket = roleRecord?.role === "admin" || Boolean(memberships?.some((membership) => membership.user_id === userId));
   const validTickets = (tickets ?? []).filter(
     (ticket) => isTicketStatus(ticket.status) && isTicketPriority(ticket.priority) && isTicketType(ticket.ticket_type),
@@ -114,10 +117,10 @@ export default async function ProjectBoardPage({ params }: { params: Promise<{ p
         <div className="relative mt-4 overflow-hidden rounded-[2rem] bg-[#171717] px-6 py-8 text-white shadow-[0_24px_70px_rgba(23,23,23,.16)] sm:px-9 sm:py-11">
           <div className="absolute -right-20 -top-32 size-80 rounded-full bg-[#f00073] opacity-20 blur-[100px]" />
           <div className="flex flex-col justify-between gap-6 lg:flex-row lg:items-end">
-          <div className="relative"><p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[#ff64ad]">Client project portal</p><h1 className="mt-4 text-5xl leading-none sm:text-6xl">{project.name}</h1>{project.description && <p className="mt-4 max-w-2xl text-sm leading-6 text-white/60">{project.description}</p>}<div className="mt-6 flex flex-wrap gap-4 text-xs text-white/40"><span className="flex items-center gap-1.5"><Users aria-hidden="true" className="size-3.5" />{memberships?.length ?? 0} members</span>{periodLabel && <span className="flex items-center gap-1.5"><CalendarDays aria-hidden="true" className="size-3.5" />{periodLabel}</span>}</div></div>
+          <div className="relative"><p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[#ff64ad]">{isClient ? "Your project workspace" : "Agency delivery workspace"}</p><h1 className="mt-4 text-5xl leading-none sm:text-6xl">{project.name}</h1>{project.description && <p className="mt-4 max-w-2xl text-sm leading-6 text-white/60">{markdownToPlainText(project.description)}</p>}<div className="mt-6 flex flex-wrap gap-4 text-xs text-white/40">{!isClient && <span className="flex items-center gap-1.5"><Users aria-hidden="true" className="size-3.5" />{memberships?.length ?? 0} members</span>}{periodLabel && <span className="flex items-center gap-1.5"><CalendarDays aria-hidden="true" className="size-3.5" />{periodLabel}</span>}</div></div>
           <div className="flex items-center gap-4">
             <span className="text-sm text-white/45">{boardTickets.length} {isClient ? "requests" : "tickets"}</span>
-            {canCreateTicket && <TicketComposer clientRequest={roleRecord?.role === "client"} members={ticketMembers} projectId={project.id} />}
+            {canCreateTicket && <TicketComposer autoOpen={isClient && query.new === "request"} canPlan={canManage} clientRequest={isClient} members={ticketMembers} projectId={project.id} />}
             {roleRecord?.role === "admin" && <DeleteProjectButton projectId={project.id} projectName={project.name} />}
           </div>
           </div>
@@ -127,7 +130,7 @@ export default async function ProjectBoardPage({ params }: { params: Promise<{ p
 
         {roleRecord?.role === "admin" && <ProjectAdminSettings budgetAmount={project.budget_amount === null ? null : Number(project.budget_amount)} currency={project.currency} periodEnd={project.retainer_period_end} periodStart={project.retainer_period_start} projectId={project.id} retainerHours={project.retainer_hours === null ? null : Number(project.retainer_hours)} selectedMemberIds={(memberships ?? []).map((membership) => membership.user_id)} users={userOptions} />}
 
-        <div className="mt-10"><div className="mb-4"><p className="eyebrow">Delivery</p><h2 className="font-display mt-2 text-3xl leading-none">{isClient ? "Request status" : "Task board"}</h2>{isClient && <p className="mt-2 text-sm text-slate-500">Follow submitted requests from intake through delivery.</p>}</div><KanbanBoard canManage={canManage} clientView={isClient} projectId={project.id} tickets={boardTickets} /></div>
+        <div className="mt-10"><div className="mb-4"><p className="eyebrow">Delivery</p><h2 className="font-display mt-2 text-3xl leading-none">{isClient ? "Request status" : "Task board"}</h2>{isClient && <p className="mt-2 text-sm text-slate-500">Follow submitted requests from intake through delivery.</p>}</div><KanbanBoard canManage={canMoveTickets} clientView={isClient} projectId={project.id} tickets={boardTickets} /></div>
       </div>
     </main>
   );

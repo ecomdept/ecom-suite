@@ -6,6 +6,7 @@ import {
   type ProjectMemberOption,
 } from "@/components/projects/create-project-form";
 import { requireUser } from "@/lib/auth/session";
+import { markdownToPlainText } from "@/components/ui/markdown-content";
 import { isAppRole, ROLE_LABELS } from "@/lib/auth/roles";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -133,7 +134,7 @@ export default async function ProjectsPage() {
                   <Link className="group relative overflow-hidden rounded-2xl border border-stone-200 bg-white p-6 shadow-[0_1px_2px_rgba(23,23,23,.04)] transition duration-300 before:absolute before:inset-x-0 before:top-0 before:h-1 before:origin-left before:scale-x-0 before:bg-[#f00073] before:transition-transform hover:-translate-y-1 hover:border-stone-300 hover:shadow-[0_20px_50px_rgba(23,23,23,.09)] hover:before:scale-x-100" href={`/projects/${project.id}`} key={project.id}>
                     <div className="flex items-start justify-between gap-4"><span className="grid size-11 place-items-center rounded-xl bg-pink-50 text-pink-600"><FolderKanban aria-hidden="true" className="size-5" /></span><ArrowRight aria-hidden="true" className="size-5 text-slate-300 transition group-hover:translate-x-1 group-hover:text-pink-500" /></div>
                     <h3 className="font-display mt-6 text-2xl leading-tight">{project.name}</h3>
-                    <p className="mt-1 line-clamp-2 min-h-10 text-sm leading-5 text-slate-500">{project.description || "No description provided."}</p>
+                    <p className="mt-1 line-clamp-2 min-h-10 text-sm leading-5 text-slate-500">{project.description ? markdownToPlainText(project.description) : "No description provided."}</p>
                     {showFinancials && (Number(project.retainer_hours ?? 0) > 0 || Number(project.budget_amount ?? 0) > 0) && (
                       <div className="mt-5 grid grid-cols-2 gap-3 rounded-xl bg-slate-50 p-3">
                         <div>

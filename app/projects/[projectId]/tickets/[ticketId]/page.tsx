@@ -7,6 +7,7 @@ import { SubtaskSection } from "@/components/projects/subtask-section";
 import { TicketDetailsForm } from "@/components/projects/ticket-details-form";
 import { TicketUsageForm } from "@/components/projects/ticket-usage-form";
 import { Button } from "@/components/ui/button";
+import { MarkdownContent } from "@/components/ui/markdown-content";
 import { requireUser } from "@/lib/auth/session";
 import { isTicketPriority, isTicketStatus, isTicketType } from "@/lib/projects/validation";
 
@@ -59,14 +60,34 @@ export default async function TicketPage({ params }: { params: Promise<{ project
   const { projectId, ticketId } = await params;
   const { supabase, claims } = await requireUser();
   const userId = typeof claims.sub === "string" ? claims.sub : "";
-  const [{ data: project }, { data: ticket }, { data: comments }, { data: roleRecord }, { data: subtasks }, { data: memberships }] = await Promise.all([
+  const [projectResult, ticketResult, commentsResult, roleResult, subtasksResult, membershipsResult] = await Promise.all([
     supabase.from("projects").select("id, name, currency").eq("id", projectId).maybeSingle(),
-    supabase.from("tickets").select("id, project_id, title, description, status, priority, ticket_type, acceptance_criteria, reproduction_steps, expected_behavior, actual_behavior, affected_platforms, preview_url, repository_url, design_url, dev_notes, assignee_id, due_date, estimated_hours, logged_hours, billable_amount, created_by, created_at, updated_at").eq("id", ticketId).eq("project_id", projectId).maybeSingle(),
+    supabase.from("tickets").select("id, project_id, title, description, status, priority, ticket_type, acceptance_criteria, reproduction_steps, expected_behavior, actual_behavior, affected_platforms, reference_url, preview_url, repository_url, design_url, dev_notes, assignee_id, due_date, estimated_hours, logged_hours, billable_amount, created_by, created_at, updated_at").eq("id", ticketId).eq("project_id", projectId).maybeSingle(),
     supabase.from("ticket_comments").select("id, user_id, content, created_at, is_internal").eq("ticket_id", ticketId).order("created_at", { ascending: true }),
     supabase.from("user_roles").select("role").eq("user_id", userId).maybeSingle(),
     supabase.from("ticket_subtasks").select("id, title, description, is_completed, due_date, assignee_id, estimated_hours, logged_hours, created_at").eq("ticket_id", ticketId).order("created_at", { ascending: true }),
     supabase.from("project_members").select("user_id").eq("project_id", projectId),
   ]);
+  const project = projectResult.data;
+  const comments = commentsResult.data;
+  const roleRecord = roleResult.data;
+  const subtasks = subtasksResult.data;
+  const memberships = membershipsResult.data;
+  let ticket = ticketResult.data;
+
+  if (!ticket && (
+    ticketResult.error?.code === "PGRST204"
+    || ticketResult.error?.code === "42703"
+    || ticketResult.error?.message.toLowerCase().includes("reference_url")
+  )) {
+    const { data: legacyTicket } = await supabase
+      .from("tickets")
+      .select("id, project_id, title, description, status, priority, ticket_type, acceptance_criteria, reproduction_steps, expected_behavior, actual_behavior, affected_platforms, preview_url, repository_url, design_url, dev_notes, assignee_id, due_date, estimated_hours, logged_hours, billable_amount, created_by, created_at, updated_at")
+      .eq("id", ticketId)
+      .eq("project_id", projectId)
+      .maybeSingle();
+    ticket = legacyTicket ? { ...legacyTicket, reference_url: null } : null;
+  }
 
   if (!project || !ticket || !isTicketStatus(ticket.status) || !isTicketPriority(ticket.priority) || !isTicketType(ticket.ticket_type)) notFound();
 
@@ -84,7 +105,8 @@ export default async function TicketPage({ params }: { params: Promise<{ project
   const reporterName = ticket.created_by ? profileById.get(ticket.created_by) || "Project member" : "Deleted user";
   const memberNames = members.map((member) => member.name);
   const references = [
-    { label: "Preview", url: safeUrl(ticket.preview_url), icon: Link2 },
+    { label: "Reference", url: safeUrl(ticket.reference_url), icon: Link2 },
+    { label: "Delivery preview", url: safeUrl(ticket.preview_url), icon: ExternalLink },
     ...(!isClient ? [{ label: "GitHub", url: safeUrl(ticket.repository_url), icon: GitBranch }] : []),
     { label: "Design", url: safeUrl(ticket.design_url), icon: Palette },
   ].filter((reference) => reference.url);
@@ -104,15 +126,15 @@ export default async function TicketPage({ params }: { params: Promise<{ project
         <div className="mt-8 grid gap-8 lg:grid-cols-[minmax(0,1fr)_320px]">
           <div className="grid min-w-0 content-start gap-7">
             <article className="overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-sm">
-              <div className="p-5 sm:p-7"><h2 className="text-sm font-semibold">Description</h2><p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-700">{ticket.description || "No description provided."}</p></div>
+              <div className="p-5 sm:p-7"><h2 className="text-sm font-semibold">Description</h2><div className="mt-3">{ticket.description ? <MarkdownContent content={ticket.description} /> : <p className="text-sm text-slate-500">No description provided.</p>}</div></div>
               {ticket.ticket_type === "bug" ? (
                 <div className="grid gap-6 border-t border-stone-100 p-5 sm:p-7">
-                  <div><h2 className="text-sm font-semibold">Affected platforms</h2><div className="mt-3 flex flex-wrap gap-2">{ticket.affected_platforms.map((platform: string) => <span className="rounded-md bg-red-50 px-2.5 py-1 text-xs font-medium capitalize text-red-700" key={platform}>{platform}</span>)}</div></div>
-                  <div><h2 className="text-sm font-semibold">Steps to reproduce</h2><p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-700">{ticket.reproduction_steps}</p></div>
-                  <div className="grid gap-5 sm:grid-cols-2"><div className="rounded-xl bg-emerald-50/70 p-4"><h2 className="text-sm font-semibold text-emerald-900">Expected behavior</h2><p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-emerald-950/80">{ticket.expected_behavior}</p></div><div className="rounded-xl bg-red-50/70 p-4"><h2 className="text-sm font-semibold text-red-900">Actual behavior</h2><p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-red-950/80">{ticket.actual_behavior}</p></div></div>
+                  {ticket.affected_platforms.length > 0 && <div><h2 className="text-sm font-semibold">Affected platforms</h2><div className="mt-3 flex flex-wrap gap-2">{ticket.affected_platforms.map((platform: string) => <span className="rounded-md bg-red-50 px-2.5 py-1 text-xs font-medium capitalize text-red-700" key={platform}>{platform}</span>)}</div></div>}
+                  {ticket.reproduction_steps && <div><h2 className="text-sm font-semibold">Steps to reproduce</h2><div className="mt-3"><MarkdownContent content={ticket.reproduction_steps} /></div></div>}
+                  {(ticket.expected_behavior || ticket.actual_behavior) && <div className="grid gap-5 sm:grid-cols-2">{ticket.expected_behavior && <div className="rounded-xl bg-emerald-50/70 p-4"><h2 className="text-sm font-semibold text-emerald-900">Expected behavior</h2><MarkdownContent className="mt-2 text-emerald-950/80" content={ticket.expected_behavior} /></div>}{ticket.actual_behavior && <div className="rounded-xl bg-red-50/70 p-4"><h2 className="text-sm font-semibold text-red-900">Actual behavior</h2><MarkdownContent className="mt-2 text-red-950/80" content={ticket.actual_behavior} /></div>}</div>}
                 </div>
-              ) : <div className="border-t border-stone-100 p-5 sm:p-7"><h2 className="text-sm font-semibold">Acceptance criteria</h2><p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-700">{ticket.acceptance_criteria || "No acceptance criteria provided."}</p></div>}
-              {((!isClient && ticket.dev_notes) || references.length > 0) && <div className="grid gap-6 border-t border-stone-100 bg-slate-50/60 p-5 sm:p-7">{references.length > 0 && <div><h2 className="text-sm font-semibold">References</h2><div className="mt-3 flex flex-wrap gap-2">{references.map((reference) => <a className="inline-flex items-center gap-2 rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm font-medium text-pink-600 hover:border-pink-200" href={reference.url ?? undefined} key={reference.label} rel="noreferrer" target="_blank"><reference.icon aria-hidden="true" className="size-4" />{reference.label}<ExternalLink aria-hidden="true" className="size-3" /></a>)}</div></div>}{!isClient && ticket.dev_notes && <div><h2 className="text-sm font-semibold">Development notes</h2><p className="mt-3 whitespace-pre-wrap rounded-xl bg-slate-900 p-4 font-mono text-xs leading-6 text-slate-200">{ticket.dev_notes}</p></div>}</div>}
+              ) : ticket.acceptance_criteria && <div className="border-t border-stone-100 p-5 sm:p-7"><h2 className="text-sm font-semibold">Desired outcome</h2><MarkdownContent className="mt-3" content={ticket.acceptance_criteria} /></div>}
+              {((!isClient && ticket.dev_notes) || references.length > 0) && <div className="grid gap-6 border-t border-stone-100 bg-slate-50/60 p-5 sm:p-7">{references.length > 0 && <div><h2 className="text-sm font-semibold">Links and references</h2><div className="mt-3 flex flex-wrap gap-2">{references.map((reference) => <a className="inline-flex items-center gap-2 rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm font-medium text-pink-600 hover:border-pink-200" href={reference.url ?? undefined} key={reference.label} rel="noreferrer" target="_blank"><reference.icon aria-hidden="true" className="size-4" />{reference.label}<ExternalLink aria-hidden="true" className="size-3" /></a>)}</div></div>}{!isClient && ticket.dev_notes && <div><h2 className="text-sm font-semibold">Development notes</h2><div className="mt-3 rounded-xl bg-slate-950 p-4"><MarkdownContent className="text-slate-200" content={ticket.dev_notes} /></div></div>}</div>}
             </article>
 
             {canManage && <TicketDetailsForm members={members} projectId={projectId} ticket={ticket} ticketId={ticketId} />}
@@ -128,7 +150,7 @@ export default async function TicketPage({ params }: { params: Promise<{ project
           <aside className="grid content-start gap-5 lg:sticky lg:top-6 lg:self-start">
             <section className="rounded-2xl border border-stone-200 bg-white p-5 shadow-sm" aria-label="Ticket details">
               <div className="flex flex-wrap items-center gap-2"><span className="rounded-full bg-pink-50 px-2.5 py-1 text-xs font-medium text-pink-700">{statusLabels[ticket.status]}</span><span className={`rounded-full px-2.5 py-1 text-xs font-medium capitalize ${priorityClasses[ticket.priority]}`}>{ticket.priority} priority</span></div>
-              <dl className="mt-5 grid gap-5 text-sm"><div><dt className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-slate-400"><UserRound aria-hidden="true" className="size-3.5" />Assignee</dt><dd className="mt-2 font-medium">{assigneeName}</dd></div><div><dt className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-slate-400"><UserRound aria-hidden="true" className="size-3.5" />Reporter</dt><dd className="mt-2 font-medium">{reporterName}</dd></div><div><dt className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-slate-400"><CalendarDays aria-hidden="true" className="size-3.5" />Due date</dt><dd className="mt-2 font-medium">{ticket.due_date ? formatDate(ticket.due_date) : "Not set"}</dd></div></dl>
+              <dl className="mt-5 grid gap-5 text-sm">{!isClient && <div><dt className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-slate-400"><UserRound aria-hidden="true" className="size-3.5" />Assignee</dt><dd className="mt-2 font-medium">{assigneeName}</dd></div>}<div><dt className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-slate-400"><UserRound aria-hidden="true" className="size-3.5" />{isClient ? "Requested by" : "Reporter"}</dt><dd className="mt-2 font-medium">{reporterName}</dd></div><div><dt className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-slate-400"><CalendarDays aria-hidden="true" className="size-3.5" />{isClient ? "Target date" : "Due date"}</dt><dd className="mt-2 font-medium">{ticket.due_date ? formatDate(ticket.due_date) : isClient ? "To be confirmed" : "Not set"}</dd></div></dl>
               <dl className={`mt-6 grid gap-2 border-t border-stone-100 pt-5 text-center ${isClient ? "grid-cols-2" : "grid-cols-3"}`}><div><dt className="text-[10px] uppercase tracking-wide text-slate-400">Estimate</dt><dd className="mt-1 text-sm font-semibold">{Number(ticket.estimated_hours).toFixed(1)}h</dd></div><div><dt className="text-[10px] uppercase tracking-wide text-slate-400">{isClient ? "Retainer used" : "Logged"}</dt><dd className="mt-1 text-sm font-semibold">{Number(ticket.logged_hours).toFixed(1)}h</dd></div>{!isClient && <div><dt className="text-[10px] uppercase tracking-wide text-slate-400">Billable</dt><dd className="mt-1 text-sm font-semibold">{project.currency} {Number(ticket.billable_amount).toLocaleString(undefined, { maximumFractionDigits: 0 })}</dd></div>}</dl>
             </section>
             {canManage && <section className="rounded-2xl border border-stone-200 bg-white p-5 shadow-sm" aria-label="Ticket usage management"><TicketUsageForm billableAmount={Number(ticket.billable_amount)} currency={project.currency} estimatedHours={Number(ticket.estimated_hours)} loggedHours={Number(ticket.logged_hours)} projectId={projectId} ticketId={ticketId} /></section>}
