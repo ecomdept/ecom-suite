@@ -16,11 +16,12 @@ export type NotificationItem = {
 
 export async function getNotificationsAction(): Promise<NotificationItem[]> {
   const { supabase } = await requireUser();
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from("notifications")
     .select("id, notification_type, project_id, ticket_id, message, read_at, created_at")
     .order("created_at", { ascending: false })
     .limit(30);
+  if (error) console.error("notification refresh failed", { code: error.code, message: error.message });
 
   return (data ?? []).filter(
     (notification) => notification.notification_type === "ticket_assignment" || notification.notification_type === "comment_mention",

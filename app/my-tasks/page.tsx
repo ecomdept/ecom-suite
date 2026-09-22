@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { AlertTriangle, CalendarDays, CheckCircle2, Clock3, ListChecks } from "lucide-react";
+import { AlertTriangle, CalendarDays, CheckCircle2, Clock3, Gauge, ListChecks } from "lucide-react";
 import { AppHeader } from "@/components/app-header";
 import { requireUser } from "@/lib/auth/session";
 import { isTicketStatus } from "@/lib/projects/validation";
@@ -18,12 +18,18 @@ type TaskRow = {
   dueDate: string | null;
   estimatedHours: number;
   loggedHours: number;
+  priority: "low" | "medium" | "high";
   status: string;
 };
 
+const priorityOrder = { high: 0, medium: 1, low: 2 } as const;
+
 const statusLabels: Record<string, string> = {
   backlog: "Backlog",
+  pending_approval: "Pending approval",
   in_progress: "In progress",
+  client_uat: "Client UAT",
+  ready_for_deploy: "Ready for deploy",
 };
 
 function formatDate(value: string) {
@@ -41,14 +47,14 @@ export default async function MyTasksPage() {
   if (roleRecord?.role === "client") notFound();
 
   const [{ data: assignedTickets, error: ticketError }, { data: assignedSubtasks, error: subtaskError }] = await Promise.all([
-    supabase.from("tickets").select("id, project_id, title, due_date, estimated_hours, logged_hours, status").eq("assignee_id", userId),
+    supabase.from("tickets").select("id, project_id, title, due_date, estimated_hours, logged_hours, status, priority").eq("assignee_id", userId),
     supabase.from("ticket_subtasks").select("id, ticket_id, title, due_date, estimated_hours, logged_hours, is_completed").eq("assignee_id", userId).eq("is_completed", false),
   ]);
 
   const incompleteTickets = (assignedTickets ?? []).filter((ticket) => isTicketStatus(ticket.status) && ticket.status !== "completed" && ticket.status !== "archived");
   const parentTicketIds = [...new Set((assignedSubtasks ?? []).map((subtask) => subtask.ticket_id))];
   const { data: parentTickets } = parentTicketIds.length
-    ? await supabase.from("tickets").select("id, project_id, status").in("id", parentTicketIds)
+    ? await supabase.from("tickets").select("id, project_id, status, priority").in("id", parentTicketIds)
     : { data: [] };
   const parentById = new Map(parentTickets?.map((ticket) => [ticket.id, ticket]));
   const projectIds = [...new Set([
@@ -71,6 +77,7 @@ export default async function MyTasksPage() {
       dueDate: ticket.due_date,
       estimatedHours: Number(ticket.estimated_hours ?? 0),
       loggedHours: Number(ticket.logged_hours ?? 0),
+      priority: ticket.priority,
       status: statusLabels[ticket.status] || ticket.status,
     })),
     ...(assignedSubtasks ?? []).flatMap((subtask) => {
@@ -86,14 +93,20 @@ export default async function MyTasksPage() {
         dueDate: subtask.due_date,
         estimatedHours: Number(subtask.estimated_hours ?? 0),
         loggedHours: Number(subtask.logged_hours ?? 0),
+        priority: parent.priority,
         status: "To do",
       }];
     }),
-  ].sort((left, right) => {
-    if (left.dueDate && right.dueDate) return left.dueDate.localeCompare(right.dueDate) || left.title.localeCompare(right.title);
+  ].sort((left: TaskRow, right: TaskRow) => {
+    if (left.dueDate && right.dueDate) {
+      return left.dueDate.localeCompare(right.dueDate)
+        || priorityOrder[left.priority] - priorityOrder[right.priority]
+        || left.title.localeCompare(right.title);
+    }
     if (left.dueDate) return -1;
     if (right.dueDate) return 1;
-    return left.title.localeCompare(right.title);
+    return priorityOrder[left.priority] - priorityOrder[right.priority]
+      || left.title.localeCompare(right.title);
   });
 
   const hoursByDate = new Map<string, number>();
@@ -105,6 +118,28 @@ export default async function MyTasksPage() {
   const overdueCount = tasks.filter((task) => task.dueDate && task.dueDate < today).length;
   const totalEstimated = tasks.reduce((total, task) => total + task.estimatedHours, 0);
   const totalLogged = tasks.reduce((total, task) => total + task.loggedHours, 0);
+  const remainingHours = tasks.reduce(
+    (total, task) =>
+      total + Math.max(0, task.estimatedHours - task.loggedHours),
+    0,
+  );
+  const workloadStatus = overdueCount > 0
+    ? {
+        label: "Off track",
+        detail: `${overdueCount} overdue ${overdueCount === 1 ? "item" : "items"}`,
+        classes: "border-red-200 bg-red-50 text-red-700",
+      }
+    : remainingHours < 7
+      ? {
+          label: "Available",
+          detail: "Capacity for more work",
+          classes: "border-blue-200 bg-blue-50 text-blue-700",
+        }
+      : {
+          label: "On track",
+          detail: "No overdue work",
+          classes: "border-emerald-200 bg-emerald-50 text-emerald-700",
+        };
 
   return (
     <main className="min-h-svh bg-[#f6f3ee] text-slate-950">
@@ -114,7 +149,8 @@ export default async function MyTasksPage() {
 
         {(ticketError || subtaskError) && <div className="mt-8 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800" role="alert">Task time tracking is not available yet. Apply the latest Supabase migration and reload this page.</div>}
 
-        <section aria-label="Task summary" className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <section aria-label="Task summary" className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-6">
+          <article className={`rounded-2xl border p-5 shadow-sm sm:col-span-2 ${workloadStatus.classes}`}><div className="flex items-start justify-between gap-4"><div><p className="text-sm opacity-75">Workload status</p><p className="mt-2 text-2xl font-semibold">{workloadStatus.label}</p><p className="mt-1 text-xs opacity-75">{workloadStatus.detail}</p></div><Gauge aria-hidden="true" className="size-5" /></div></article>
           <article className="rounded-2xl border border-stone-200 bg-white p-5 shadow-sm"><p className="text-sm text-slate-500">Incomplete</p><p className="mt-2 text-2xl font-semibold">{tasks.length}</p></article>
           <article className="rounded-2xl border border-stone-200 bg-white p-5 shadow-sm"><p className="text-sm text-slate-500">Overdue</p><p className={`mt-2 text-2xl font-semibold ${overdueCount ? "text-red-600" : ""}`}>{overdueCount}</p></article>
           <article className="rounded-2xl border border-stone-200 bg-white p-5 shadow-sm"><p className="text-sm text-slate-500">Estimated / logged</p><p className="mt-2 text-2xl font-semibold">{formatHours(totalEstimated)}h <span className="text-base font-normal text-slate-400">/ {formatHours(totalLogged)}h</span></p></article>

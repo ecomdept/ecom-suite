@@ -5,6 +5,7 @@ import { Loader2, Pencil, Save } from "lucide-react";
 import { updateTicketDetailsAction, type ProjectActionState } from "@/app/projects/actions";
 import { FormMessage } from "@/components/auth/form-message";
 import { Button } from "@/components/ui/button";
+import { DatePicker } from "@/components/ui/date-picker";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RichTextEditor } from "@/components/ui/rich-text-editor";
@@ -58,7 +59,7 @@ export function TicketDetailsForm({ projectId, ticketId, ticket, members }: { pr
         <fieldset className="grid gap-4 rounded-xl border border-stone-200 p-4 sm:grid-cols-2">
           <legend className="px-1 text-sm font-medium">Assignment and references</legend>
           <div className="space-y-2"><Label htmlFor="edit-assignee">Assignee</Label><select className="flex h-10 w-full rounded-md border border-input bg-white px-3 text-sm shadow-sm" defaultValue={ticket.assignee_id ?? ""} id="edit-assignee" name="assigneeId"><option value="">Unassigned</option>{members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}</select></div>
-          <div className="space-y-2"><Label htmlFor="edit-due-date">Due date</Label><Input defaultValue={ticket.due_date ?? ""} id="edit-due-date" name="dueDate" type="date" /></div>
+          <div className="space-y-2"><Label htmlFor="edit-due-date">Due date</Label><DatePicker defaultValue={ticket.due_date ?? ""} id="edit-due-date" name="dueDate" /></div>
           <div className="space-y-2"><Label htmlFor="edit-reference-url">Reference URL</Label><Input defaultValue={ticket.reference_url ?? ""} id="edit-reference-url" maxLength={2000} name="referenceUrl" type="url" /></div>
           <div className="space-y-2"><Label htmlFor="edit-preview-url">Preview or staging URL</Label><Input defaultValue={ticket.preview_url ?? ""} id="edit-preview-url" maxLength={2000} name="previewUrl" type="url" /></div>
           <div className="space-y-2"><Label htmlFor="edit-design-url">Design URL</Label><Input defaultValue={ticket.design_url ?? ""} id="edit-design-url" maxLength={2000} name="designUrl" type="url" /></div>

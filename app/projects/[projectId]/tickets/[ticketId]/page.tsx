@@ -6,6 +6,7 @@ import { CommentForm } from "@/components/projects/comment-form";
 import { SubtaskSection } from "@/components/projects/subtask-section";
 import { TicketDetailsForm } from "@/components/projects/ticket-details-form";
 import { TicketUsageForm } from "@/components/projects/ticket-usage-form";
+import { TicketWorkflowPanel } from "@/components/projects/ticket-workflow-panel";
 import { Button } from "@/components/ui/button";
 import { MarkdownContent } from "@/components/ui/markdown-content";
 import { requireUser } from "@/lib/auth/session";
@@ -14,7 +15,7 @@ import { isTicketPriority, isTicketStatus, isTicketType } from "@/lib/projects/v
 export const instant = false;
 
 const priorityClasses = { low: "bg-stone-100 text-slate-600", medium: "bg-amber-50 text-amber-700", high: "bg-red-50 text-red-700" };
-const statusLabels = { backlog: "Backlog", in_progress: "In progress", completed: "Completed", archived: "Archived" };
+const statusLabels = { backlog: "Backlog", pending_approval: "Pending approval", in_progress: "In progress", client_uat: "Client UAT", ready_for_deploy: "Ready for deploy", completed: "Completed", archived: "Archived" };
 const typeDetails = {
   new_feature: { label: "New feature", icon: Sparkles, classes: "bg-pink-50 text-pink-700" },
   feature_update: { label: "Feature update", icon: RefreshCw, classes: "bg-blue-50 text-blue-700" },
@@ -61,11 +62,11 @@ export default async function TicketPage({ params }: { params: Promise<{ project
   const { supabase, claims } = await requireUser();
   const userId = typeof claims.sub === "string" ? claims.sub : "";
   const [projectResult, ticketResult, commentsResult, roleResult, subtasksResult, membershipsResult] = await Promise.all([
-    supabase.from("projects").select("id, name, currency").eq("id", projectId).maybeSingle(),
-    supabase.from("tickets").select("id, project_id, title, description, status, priority, ticket_type, acceptance_criteria, reproduction_steps, expected_behavior, actual_behavior, affected_platforms, reference_url, preview_url, repository_url, design_url, dev_notes, assignee_id, due_date, estimated_hours, logged_hours, billable_amount, created_by, created_at, updated_at").eq("id", ticketId).eq("project_id", projectId).maybeSingle(),
+    supabase.from("projects").select("id, name, hourly_rate").eq("id", projectId).maybeSingle(),
+    supabase.from("tickets").select("id, project_id, title, description, status, priority, ticket_type, acceptance_criteria, reproduction_steps, expected_behavior, actual_behavior, affected_platforms, reference_url, preview_url, repository_url, design_url, dev_notes, assignee_id, due_date, estimated_hours, logged_hours, billable_amount, created_by, created_at, updated_at, work_category, approval_status, previous_estimated_hours").eq("id", ticketId).eq("project_id", projectId).maybeSingle(),
     supabase.from("ticket_comments").select("id, user_id, content, created_at, is_internal").eq("ticket_id", ticketId).order("created_at", { ascending: true }),
     supabase.from("user_roles").select("role").eq("user_id", userId).maybeSingle(),
-    supabase.from("ticket_subtasks").select("id, title, description, is_completed, due_date, assignee_id, estimated_hours, logged_hours, created_at").eq("ticket_id", ticketId).order("created_at", { ascending: true }),
+    supabase.from("ticket_subtasks").select("id, title, description, is_completed, due_date, assignee_id, estimated_hours, logged_hours, created_at, subtask_type, is_internal, dev_pr_url, dev_preview_url, dev_notes").eq("ticket_id", ticketId).order("created_at", { ascending: true }),
     supabase.from("project_members").select("user_id").eq("project_id", projectId),
   ]);
   const project = projectResult.data;
@@ -86,7 +87,7 @@ export default async function TicketPage({ params }: { params: Promise<{ project
       .eq("id", ticketId)
       .eq("project_id", projectId)
       .maybeSingle();
-    ticket = legacyTicket ? { ...legacyTicket, reference_url: null } : null;
+    ticket = legacyTicket ? { ...legacyTicket, reference_url: null, work_category: null, approval_status: "draft", previous_estimated_hours: null } : null;
   }
 
   if (!project || !ticket || !isTicketStatus(ticket.status) || !isTicketPriority(ticket.priority) || !isTicketType(ticket.ticket_type)) notFound();
@@ -104,6 +105,9 @@ export default async function TicketPage({ params }: { params: Promise<{ project
   const assigneeName = ticket.assignee_id ? profileById.get(ticket.assignee_id) || "Project member" : "Unassigned";
   const reporterName = ticket.created_by ? profileById.get(ticket.created_by) || "Project member" : "Deleted user";
   const memberNames = members.map((member) => member.name);
+  const subtaskLoggedHours = (subtasks ?? []).reduce((total, subtask) => total + Number(subtask.logged_hours ?? 0), 0);
+  const totalLoggedHours = Number(ticket.logged_hours ?? 0) + subtaskLoggedHours;
+  const clientFeedbackItems = (subtasks ?? []).filter((subtask) => !subtask.is_internal && subtask.title === "Client feedback");
   const references = [
     { label: "Reference", url: safeUrl(ticket.reference_url), icon: Link2 },
     { label: "Delivery preview", url: safeUrl(ticket.preview_url), icon: ExternalLink },
@@ -115,7 +119,7 @@ export default async function TicketPage({ params }: { params: Promise<{ project
     <main className="min-h-svh bg-[#f6f3ee] text-slate-950">
       <AppHeader />
       <div className="mx-auto max-w-7xl px-5 py-8 sm:px-8 sm:py-10">
-        <Button asChild className="-ml-3 text-slate-500" variant="ghost"><Link href={`/projects/${projectId}`}><ArrowLeft aria-hidden="true" />Back to {project.name}</Link></Button>
+        <Button asChild className="-ml-3 text-slate-500" variant="ghost"><Link href={isClient ? "/dashboard" : `/projects/${projectId}`}><ArrowLeft aria-hidden="true" />Back to {isClient ? "dashboard" : project.name}</Link></Button>
         <header className="relative mt-4 overflow-hidden rounded-[2rem] bg-[#171717] px-6 py-8 text-white shadow-[0_24px_70px_rgba(23,23,23,.14)] sm:px-9 sm:py-10">
           <div className="absolute -right-14 -top-20 size-60 rounded-full bg-[#f00073] opacity-20 blur-[80px]" />
           <div className="relative flex flex-wrap items-center gap-2 text-xs"><span className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 font-medium ${typeDetail.classes}`}><TypeIcon aria-hidden="true" className="size-3.5" />{typeDetail.label}</span><span className="font-mono font-medium text-white/55">{ticketKey}</span><span className="text-white/20">/</span><span className="text-white/45">{project.name}</span></div>
@@ -138,7 +142,9 @@ export default async function TicketPage({ params }: { params: Promise<{ project
             </article>
 
             {canManage && <TicketDetailsForm members={members} projectId={projectId} ticket={ticket} ticketId={ticketId} />}
-            <SubtaskSection canWork={canWork} clientView={isClient} members={members} projectId={projectId} subtasks={subtasks ?? []} ticketId={ticketId} />
+            <TicketWorkflowPanel approvalStatus={ticket.approval_status ?? "draft"} canManage={canManage} estimatedHours={Number(ticket.estimated_hours)} isClient={isClient} previousEstimatedHours={ticket.previous_estimated_hours === null ? null : Number(ticket.previous_estimated_hours)} projectId={projectId} ticketId={ticketId} workCategory={ticket.work_category ?? null} />
+            {!isClient && <SubtaskSection canWork={canWork} members={members} projectId={projectId} subtasks={subtasks ?? []} ticketDevNotes={ticket.dev_notes} ticketId={ticketId} ticketPreviewUrl={ticket.preview_url} ticketRepositoryUrl={ticket.repository_url} />}
+            {isClient && clientFeedbackItems.length > 0 && <section className="rounded-2xl border border-stone-200 bg-white p-5 shadow-sm sm:p-7"><h2 className="text-lg font-semibold">UAT feedback history</h2><p className="mt-1 text-sm text-slate-500">Feedback previously sent back to the delivery team.</p><div className="mt-5 grid gap-3">{clientFeedbackItems.map((feedback) => <article className="rounded-xl border border-stone-200 bg-slate-50 p-4" key={feedback.id}><MarkdownContent content={feedback.description ?? "No feedback details provided."}/></article>)}</div></section>}
 
             <section aria-labelledby="comments-heading" className="overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-sm">
               <div className="flex items-center justify-between border-b border-stone-100 px-5 py-5 sm:px-7"><div className="flex items-center gap-3"><span className="grid size-9 place-items-center rounded-xl bg-pink-50 text-pink-600"><MessageSquare aria-hidden="true" className="size-4" /></span><h2 className="text-lg font-semibold" id="comments-heading">{isClient ? "Project conversation" : "Activity and comments"}</h2></div><span className="text-sm text-slate-500">{comments?.length ?? 0}</span></div>
@@ -151,9 +157,9 @@ export default async function TicketPage({ params }: { params: Promise<{ project
             <section className="rounded-2xl border border-stone-200 bg-white p-5 shadow-sm" aria-label="Ticket details">
               <div className="flex flex-wrap items-center gap-2"><span className="rounded-full bg-pink-50 px-2.5 py-1 text-xs font-medium text-pink-700">{statusLabels[ticket.status]}</span><span className={`rounded-full px-2.5 py-1 text-xs font-medium capitalize ${priorityClasses[ticket.priority]}`}>{ticket.priority} priority</span></div>
               <dl className="mt-5 grid gap-5 text-sm">{!isClient && <div><dt className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-slate-400"><UserRound aria-hidden="true" className="size-3.5" />Assignee</dt><dd className="mt-2 font-medium">{assigneeName}</dd></div>}<div><dt className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-slate-400"><UserRound aria-hidden="true" className="size-3.5" />{isClient ? "Requested by" : "Reporter"}</dt><dd className="mt-2 font-medium">{reporterName}</dd></div><div><dt className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-slate-400"><CalendarDays aria-hidden="true" className="size-3.5" />{isClient ? "Target date" : "Due date"}</dt><dd className="mt-2 font-medium">{ticket.due_date ? formatDate(ticket.due_date) : isClient ? "To be confirmed" : "Not set"}</dd></div></dl>
-              <dl className={`mt-6 grid gap-2 border-t border-stone-100 pt-5 text-center ${isClient ? "grid-cols-2" : "grid-cols-3"}`}><div><dt className="text-[10px] uppercase tracking-wide text-slate-400">Estimate</dt><dd className="mt-1 text-sm font-semibold">{Number(ticket.estimated_hours).toFixed(1)}h</dd></div><div><dt className="text-[10px] uppercase tracking-wide text-slate-400">{isClient ? "Retainer used" : "Logged"}</dt><dd className="mt-1 text-sm font-semibold">{Number(ticket.logged_hours).toFixed(1)}h</dd></div>{!isClient && <div><dt className="text-[10px] uppercase tracking-wide text-slate-400">Billable</dt><dd className="mt-1 text-sm font-semibold">{project.currency} {Number(ticket.billable_amount).toLocaleString(undefined, { maximumFractionDigits: 0 })}</dd></div>}</dl>
+              <dl className={`mt-6 grid gap-2 border-t border-stone-100 pt-5 text-center ${isClient ? "grid-cols-1" : "grid-cols-3"}`}><div><dt className="text-[10px] uppercase tracking-wide text-slate-400">Estimate</dt><dd className="mt-1 text-sm font-semibold">{Number(ticket.estimated_hours).toFixed(1)}h</dd></div>{!isClient && <div><dt className="text-[10px] uppercase tracking-wide text-slate-400">Logged</dt><dd className="mt-1 text-sm font-semibold">{totalLoggedHours.toFixed(1)}h</dd></div>}{!isClient && <div><dt className="text-[10px] uppercase tracking-wide text-slate-400">Billable</dt><dd className="mt-1 text-sm font-semibold">USD {(totalLoggedHours * Number(project.hourly_rate ?? 0)).toLocaleString(undefined, { maximumFractionDigits: 0 })}</dd></div>}</dl>
             </section>
-            {canManage && <section className="rounded-2xl border border-stone-200 bg-white p-5 shadow-sm" aria-label="Ticket usage management"><TicketUsageForm billableAmount={Number(ticket.billable_amount)} currency={project.currency} estimatedHours={Number(ticket.estimated_hours)} loggedHours={Number(ticket.logged_hours)} projectId={projectId} ticketId={ticketId} /></section>}
+            {canManage && <section className="rounded-2xl border border-stone-200 bg-white p-5 shadow-sm" aria-label="Ticket usage management"><TicketUsageForm directLoggedHours={Number(ticket.logged_hours)} hourlyRate={project.hourly_rate === null ? null : Number(project.hourly_rate)} subtaskLoggedHours={subtaskLoggedHours} projectId={projectId} ticketId={ticketId} /></section>}
           </aside>
         </div>
       </div>

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ListChecks } from "lucide-react";
+import { BriefcaseBusiness, ChartNoAxesCombined, Clock3, ListChecks } from "lucide-react";
 import { LogoutButton } from "@/components/logout-button";
 import { GlobalSearch } from "@/components/global-search";
 import { NotificationsSidebar } from "@/components/notifications-sidebar";
@@ -9,7 +9,7 @@ import type { NotificationItem } from "@/app/notifications/actions";
 export async function AppHeader() {
   const { supabase, claims } = await requireUser();
   const userId = typeof claims.sub === "string" ? claims.sub : "";
-  const [{ data: notificationRows }, { data: roleRecord }] = await Promise.all([
+  const [notificationResult, { data: roleRecord }] = await Promise.all([
     supabase
       .from("notifications")
       .select("id, notification_type, project_id, ticket_id, message, read_at, created_at")
@@ -17,7 +17,11 @@ export async function AppHeader() {
       .limit(30),
     supabase.from("user_roles").select("role").eq("user_id", userId).maybeSingle(),
   ]);
+  if (notificationResult.error) console.error("notification list failed", { code: notificationResult.error.code, message: notificationResult.error.message });
+  const notificationRows = notificationResult.data;
   const isClient = roleRecord?.role === "client";
+  const isAdmin = roleRecord?.role === "admin";
+  const canAccessCrm = isAdmin || roleRecord?.role === "project_manager";
   const notifications = (notificationRows ?? []).filter(
     (notification) => notification.notification_type === "ticket_assignment" || notification.notification_type === "comment_mention",
   ) as NotificationItem[];
@@ -34,8 +38,11 @@ export async function AppHeader() {
           </Link>
           <nav aria-label="Primary navigation" className="flex items-center gap-1 text-sm">
             <Link className="hidden rounded-lg px-3 py-2 text-white/60 transition hover:bg-white/10 hover:text-white sm:block" href="/dashboard">Dashboard</Link>
-            <Link className="rounded-lg px-2 py-2 text-white/60 transition hover:bg-white/10 hover:text-white sm:px-3" href="/projects">Projects</Link>
+            {!isClient && <Link className="rounded-lg px-2 py-2 text-white/60 transition hover:bg-white/10 hover:text-white sm:px-3" href="/projects">Projects</Link>}
             {!isClient && <Link className="flex items-center gap-1.5 rounded-lg px-2 py-2 text-white/60 transition hover:bg-white/10 hover:text-white sm:px-3" href="/my-tasks"><ListChecks aria-hidden="true" className="hidden size-4 sm:block" />My tasks</Link>}
+            {!isClient && <Link className="flex items-center gap-1.5 rounded-lg px-2 py-2 text-white/60 transition hover:bg-white/10 hover:text-white sm:px-3" href="/timesheets"><Clock3 aria-hidden="true" className="hidden size-4 sm:block" />Timesheets</Link>}
+            {canAccessCrm && <Link className="flex items-center gap-1.5 rounded-lg px-2 py-2 text-white/60 transition hover:bg-white/10 hover:text-white sm:px-3" href="/crm"><BriefcaseBusiness aria-hidden="true" className="hidden size-4 sm:block" />CRM</Link>}
+            {isAdmin && <Link className="flex items-center gap-1.5 rounded-lg px-2 py-2 text-white/60 transition hover:bg-white/10 hover:text-white sm:px-3" href="/analytics"><ChartNoAxesCombined aria-hidden="true" className="hidden size-4 sm:block" />Analytics</Link>}
           </nav>
         </div>
         {!isClient && <GlobalSearch />}

@@ -8,6 +8,7 @@ import {
 } from "@/app/projects/actions";
 import { FormMessage } from "@/components/auth/form-message";
 import { Button } from "@/components/ui/button";
+import { DatePicker } from "@/components/ui/date-picker";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RichTextEditor } from "@/components/ui/rich-text-editor";
@@ -93,7 +94,7 @@ export function CreateTicketForm({
         <fieldset className="grid gap-4 rounded-xl border border-stone-200 p-4 sm:grid-cols-3">
           <legend className="px-1 text-sm font-medium">Planning</legend>
           <div className="space-y-2"><Label htmlFor="ticket-assignee">Assignee</Label><select className="flex h-10 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-sm outline-none focus-visible:ring-1 focus-visible:ring-ring" defaultValue="" id="ticket-assignee" name="assigneeId"><option value="">Unassigned</option>{members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}</select></div>
-          <div className="space-y-2"><Label htmlFor="ticket-due-date">Due date</Label><Input id="ticket-due-date" name="dueDate" type="date" /></div>
+          <div className="space-y-2"><Label htmlFor="ticket-due-date">Due date</Label><DatePicker id="ticket-due-date" name="dueDate" /></div>
           <div className="space-y-2"><Label htmlFor="ticket-estimated-hours">Estimated hours</Label><Input id="ticket-estimated-hours" min="0" name="estimatedHours" placeholder="2.5" step="0.25" type="number" /></div>
           <div className="space-y-2 sm:col-span-3"><Label htmlFor="ticket-dev-notes">Development notes</Label><RichTextEditor id="ticket-dev-notes" maxLength={10000} name="devNotes" placeholder="Implementation considerations, dependencies, technical constraints…" /></div>
         </fieldset>

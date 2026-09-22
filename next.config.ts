@@ -19,14 +19,15 @@ const forwardedOrigins = (
 
 const nextConfig: NextConfig = {
   cacheComponents: true,
+  experimental: {
+    serverActions: {
+      bodySizeLimit: "2mb",
+      ...(forwardedOrigins.length > 0 ? { allowedOrigins: forwardedOrigins } : {}),
+    },
+  },
   ...(forwardedOrigins.length > 0
     ? {
         allowedDevOrigins: forwardedOrigins,
-        experimental: {
-          serverActions: {
-            allowedOrigins: forwardedOrigins,
-          },
-        },
       }
     : {}),
 };

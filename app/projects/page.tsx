@@ -1,28 +1,25 @@
 import Link from "next/link";
-import { ArrowRight, FolderKanban, FolderPlus } from "lucide-react";
+import { redirect } from "next/navigation";
+import { ArrowRight, CalendarDays, FolderKanban, Hammer, TimerReset } from "lucide-react";
 import { AppHeader } from "@/components/app-header";
-import {
-  CreateProjectForm,
-  type ProjectMemberOption,
-} from "@/components/projects/create-project-form";
-import { requireUser } from "@/lib/auth/session";
+import { ProjectComposer } from "@/components/projects/project-composer";
+import type { ProjectMemberOption } from "@/components/projects/create-project-form";
 import { markdownToPlainText } from "@/components/ui/markdown-content";
 import { isAppRole, ROLE_LABELS } from "@/lib/auth/roles";
+import { requireUser } from "@/lib/auth/session";
+import { formatSprintLabel, getSprintWindow } from "@/lib/projects/sprints";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export const metadata = { title: "Projects" };
 export const instant = false;
 
-function formatCurrency(value: number, currency: string) {
-  try {
-    return new Intl.NumberFormat("en-US", {
-      style: "currency",
-      currency,
-      maximumFractionDigits: 0,
-    }).format(value);
-  } catch {
-    return `${currency} ${value.toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
-  }
+const statusLabels = { active: "Active", on_hold: "On hold", completed: "Completed" } as const;
+const riskLabels = { on_track: "On track", at_risk: "At risk", off_track: "Off track" } as const;
+const statusClasses = { active: "bg-blue-50 text-blue-700", on_hold: "bg-stone-100 text-slate-600", completed: "bg-emerald-50 text-emerald-700" } as const;
+const riskClasses = { on_track: "bg-emerald-50 text-emerald-700", at_risk: "bg-amber-50 text-amber-700", off_track: "bg-red-50 text-red-700" } as const;
+
+function dollars(value: number) {
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(value);
 }
 
 export default async function ProjectsPage() {
@@ -30,38 +27,52 @@ export default async function ProjectsPage() {
   const userId = typeof claims.sub === "string" ? claims.sub : "";
   const [{ data: roleRecord }, { data: projects }] = await Promise.all([
     supabase.from("user_roles").select("role").eq("user_id", userId).maybeSingle(),
-    supabase
-      .from("projects")
-      .select("id, name, description, created_at, retainer_hours, budget_amount, currency")
-      .order("created_at", { ascending: false }),
+    supabase.from("projects").select("id, name, description, created_at, project_type, client_logo_url, repository_url, retainer_hours, hourly_rate, sprint_start_date, status, risk, rollover_enabled, rollover_cap_hours").order("created_at", { ascending: false }),
   ]);
   const role = roleRecord?.role;
   const isClient = role === "client";
-  const showFinancials = role === "admin" || role === "project_manager" || isClient;
-  const projectIds = projects?.map((project) => project.id) ?? [];
-  const { data: tickets } = projectIds.length
-    ? await supabase
-        .from("tickets")
-        .select("project_id, status, logged_hours, billable_amount")
-        .in("project_id", projectIds)
-    : { data: [] };
-  const ticketCounts = new Map<
-    string,
-    { total: number; completed: number; loggedHours: number; billedAmount: number }
-  >();
+  if (isClient) redirect("/dashboard");
+  const isManagement = role === "admin" || role === "project_manager";
+  const isDeliveryTeam = !isClient && !isManagement;
+  const showRates = isManagement;
+  const projectRows = (projects ?? []) as Array<{
+    id: string; name: string; description: string | null; created_at: string; project_type: "retainer" | "new_build"; client_logo_url: string | null; repository_url: string | null; retainer_hours: number | null; hourly_rate: number | null; sprint_start_date: string; status: "active" | "on_hold" | "completed"; risk: "on_track" | "at_risk" | "off_track"; rollover_enabled: boolean; rollover_cap_hours: number | null;
+  }>;
+  const projectIds = projectRows.map((project) => project.id);
+  const sprintByProject = new Map(projectRows.map((project) => [project.id, getSprintWindow(project.sprint_start_date)]));
+  const sprintStarts = [...sprintByProject.values()].map((sprint) => sprint.start);
+  const sprintEnds = [...sprintByProject.values()].map((sprint) => sprint.endExclusive);
+  const previousSprintStarts = sprintStarts.map((start) => new Date(new Date(`${start}T00:00:00.000Z`).getTime() - 14 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10));
+
+  const [{ data: tickets }, { data: timeEntries }] = projectIds.length
+    ? await Promise.all([
+        supabase.from("tickets").select("project_id, status, logged_hours").in("project_id", projectIds),
+        isDeliveryTeam
+          ? Promise.resolve({ data: [] as Array<{ project_id: string; hours: number; work_date: string }> })
+          : supabase.rpc("get_project_daily_time_totals", { period_start: previousSprintStarts.sort()[0], period_end: sprintEnds.sort().at(-1) }),
+      ])
+    : [{ data: [] }, { data: [] }];
+  const ticketCounts = new Map<string, { total: number; active: number; completed: number }>();
+  const sprintHours = new Map<string, number>();
+  const previousSprintHours = new Map<string, number>();
+  const dailyTimeEntries = (timeEntries ?? []) as Array<{ project_id: string; hours: number; work_date: string }>;
 
   tickets?.forEach((ticket) => {
-    const count = ticketCounts.get(ticket.project_id) ?? {
-      total: 0,
-      completed: 0,
-      loggedHours: 0,
-      billedAmount: 0,
-    };
+    const count = ticketCounts.get(ticket.project_id) ?? { total: 0, active: 0, completed: 0 };
     count.total += 1;
+    if (ticket.status !== "completed" && ticket.status !== "archived") count.active += 1;
     if (ticket.status === "completed") count.completed += 1;
-    count.loggedHours += Number(ticket.logged_hours ?? 0);
-    count.billedAmount += Number(ticket.billable_amount ?? 0);
     ticketCounts.set(ticket.project_id, count);
+  });
+  dailyTimeEntries.forEach((entry) => {
+    const sprint = sprintByProject.get(entry.project_id);
+    const entryDate = entry.work_date;
+    if (sprint && entryDate >= sprint.start && entryDate < sprint.endExclusive) {
+      sprintHours.set(entry.project_id, (sprintHours.get(entry.project_id) ?? 0) + Number(entry.hours));
+    } else if (sprint) {
+      const previousStart = new Date(new Date(`${sprint.start}T00:00:00.000Z`).getTime() - 14 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      if (entryDate >= previousStart && entryDate < sprint.start) previousSprintHours.set(entry.project_id, (previousSprintHours.get(entry.project_id) ?? 0) + Number(entry.hours));
+    }
   });
 
   let memberOptions: ProjectMemberOption[] = [];
@@ -75,91 +86,47 @@ export default async function ProjectsPage() {
       ]);
       const profileById = new Map(profiles?.map((profile) => [profile.id, profile.full_name]));
       const roleById = new Map(roleRows?.map((row) => [row.user_id, row.role]));
-
-      memberOptions = (authData?.users ?? [])
-        .filter((user) => user.id !== userId)
-        .map((user) => {
-          const userRole = roleById.get(user.id);
-          return {
-            id: user.id,
-            name: profileById.get(user.id) || (typeof user.user_metadata?.full_name === "string" ? user.user_metadata.full_name : "") || user.email?.split("@")[0] || "Unknown user",
-            email: user.email ?? "No email",
-            role: userRole && isAppRole(userRole) ? ROLE_LABELS[userRole] : "No role",
-          };
-        });
+      memberOptions = (authData?.users ?? []).filter((user) => user.id !== userId).map((user) => {
+        const userRole = roleById.get(user.id);
+        return { id: user.id, name: profileById.get(user.id) || (typeof user.user_metadata?.full_name === "string" ? user.user_metadata.full_name : "") || user.email?.split("@")[0] || "Unknown user", email: user.email ?? "No email", role: userRole && isAppRole(userRole) ? ROLE_LABELS[userRole] : "No role" };
+      });
     } catch {
       memberOptions = [];
     }
+  }
+
+  const retainers = projectRows.filter((project) => project.project_type === "retainer");
+  const newBuilds = projectRows.filter((project) => project.project_type === "new_build");
+
+  function projectGrid(items: typeof projectRows, type: "retainer" | "new_build") {
+    if (!items.length) return <div className="rounded-2xl border border-dashed border-slate-300 bg-white px-6 py-10 text-center"><FolderKanban aria-hidden="true" className="mx-auto size-7 text-slate-300" /><p className="mt-3 text-sm text-slate-500">No {type === "retainer" ? "retainer projects" : "new builds"} yet.</p></div>;
+    return <div className="grid gap-4 md:grid-cols-2">{items.map((project) => {
+      const count = ticketCounts.get(project.id) ?? { total: 0, active: 0, completed: 0 };
+      const usedThisSprint = Math.max(0, sprintHours.get(project.id) ?? 0);
+      const baseHours = Number(project.retainer_hours ?? 0);
+      const previousUnused = Math.max(0, baseHours - Math.max(0, previousSprintHours.get(project.id) ?? 0));
+      const rolloverHours = project.rollover_enabled ? Math.min(previousUnused, project.rollover_cap_hours === null ? previousUnused : Number(project.rollover_cap_hours)) : 0;
+      const remainingHours = Math.max(0, baseHours + rolloverHours - usedThisSprint);
+      const sprintLabel = formatSprintLabel(project.sprint_start_date);
+      return <Link className="group relative overflow-hidden rounded-2xl border border-stone-200 bg-white p-6 shadow-[0_1px_2px_rgba(23,23,23,.04)] transition duration-300 before:absolute before:inset-x-0 before:top-0 before:h-1 before:origin-left before:scale-x-0 before:bg-[#f00073] before:transition-transform hover:-translate-y-1 hover:border-stone-300 hover:shadow-[0_20px_50px_rgba(23,23,23,.09)] hover:before:scale-x-100" href={`/projects/${project.id}`} key={project.id}>
+        <div className="flex items-start justify-between gap-4"><div className="flex items-center gap-3">{project.client_logo_url ? <span aria-label={`${project.name} logo`} className="size-11 rounded-xl border border-stone-100 bg-contain bg-center bg-no-repeat" role="img" style={{ backgroundImage: `url(${JSON.stringify(project.client_logo_url).slice(1, -1)})` }} /> : <span className="grid size-11 place-items-center rounded-xl bg-pink-50 text-pink-600">{type === "retainer" ? <TimerReset aria-hidden="true" className="size-5" /> : <Hammer aria-hidden="true" className="size-5" />}</span>}<div className="flex flex-wrap gap-1.5"><span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${statusClasses[project.status]}`}>{statusLabels[project.status]}</span><span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${riskClasses[project.risk]}`}>{riskLabels[project.risk]}</span></div></div><ArrowRight aria-hidden="true" className="size-5 text-slate-300 transition group-hover:translate-x-1 group-hover:text-pink-500" /></div>
+        <h3 className="font-display mt-6 text-2xl leading-tight">{project.name}</h3><p className="mt-1 line-clamp-2 min-h-10 text-sm leading-5 text-slate-500">{project.description ? markdownToPlainText(project.description) : "No description provided."}</p>
+        <div className="mt-5 rounded-xl bg-slate-50 p-3">
+          {type === "retainer" && !isDeliveryTeam ? <div className="grid grid-cols-2 gap-3"><div><p className="text-xs text-slate-500">Available this sprint</p><p className="mt-1 text-sm font-semibold">{remainingHours.toFixed(1)}h</p>{rolloverHours > 0 && <p className="mt-1 text-[10px] text-emerald-600">Includes {rolloverHours.toFixed(1)}h rollover</p>}</div><div><p className="text-xs text-slate-500">Sprint usage</p><p className="mt-1 text-sm font-semibold">{usedThisSprint.toFixed(1)}h / {baseHours.toFixed(1)}h renewed</p></div></div> : <div className="grid grid-cols-2 gap-3"><div><p className="text-xs text-slate-500">Active work</p><p className="mt-1 text-sm font-semibold">{count.active} tickets</p></div><div><p className="text-xs text-slate-500">Completed</p><p className="mt-1 text-sm font-semibold">{count.completed} of {count.total}</p></div></div>}
+          {showRates && project.hourly_rate !== null && <p className="mt-3 border-t border-stone-200 pt-3 text-xs text-slate-500">{dollars(Number(project.hourly_rate))}/hour · USD</p>}
+        </div>
+        <div className="mt-4 flex items-center gap-2 border-t border-stone-100 pt-4 text-xs text-slate-500"><CalendarDays aria-hidden="true" className="size-3.5" /><span>{sprintLabel}</span></div>
+      </Link>;
+    })}</div>;
   }
 
   return (
     <main className="min-h-svh bg-[#f6f3ee] text-slate-950">
       <AppHeader />
       <div className="mx-auto max-w-6xl px-5 py-10 sm:px-8 sm:py-14">
-        <div className="border-b border-black/10 pb-8 sm:flex sm:items-end sm:justify-between">
-          <div><p className="eyebrow">{isClient ? "Your client workspace" : "Delivery portfolio"}</p><h1 className="mt-3 text-5xl leading-none sm:text-6xl">Projects</h1></div>
-          <p className="mt-4 max-w-md text-sm leading-6 text-slate-600 sm:mt-0 sm:text-right">{isClient ? "Submit requests, follow delivery, and understand how your retainer is being used." : "Plan active work, coordinate the delivery team, and keep every request moving."}</p>
-        </div>
-
-        {role === "admin" && (
-          <section aria-labelledby="create-project-heading" className="mt-10 overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-sm">
-            <div className="flex items-start gap-3 border-b border-stone-100 px-5 py-5 sm:px-7">
-              <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-pink-50 text-pink-600"><FolderPlus aria-hidden="true" className="size-5" /></span>
-              <div><h2 className="text-lg font-semibold" id="create-project-heading">Create a project</h2><p className="mt-1 text-sm text-slate-500">Define the project and choose who should have access.</p></div>
-            </div>
-            <div className="p-5 sm:p-7"><CreateProjectForm users={memberOptions} /></div>
-          </section>
-        )}
-
-        <section aria-labelledby="project-list-heading" className="mt-10">
-          <div className="mb-4 flex items-center justify-between"><h2 className="text-lg font-semibold" id="project-list-heading">Project list</h2><span className="text-sm text-slate-500">{projects?.length ?? 0} total</span></div>
-          {projects?.length ? (
-            <div className="grid gap-4 md:grid-cols-2">
-              {projects.map((project) => {
-                const count = ticketCounts.get(project.id) ?? {
-                  total: 0,
-                  completed: 0,
-                  loggedHours: 0,
-                  billedAmount: 0,
-                };
-                const remainingHours = Math.max(
-                  0,
-                  Number(project.retainer_hours ?? 0) - count.loggedHours,
-                );
-                const remainingBudget = Math.max(
-                  0,
-                  Number(project.budget_amount ?? 0) - count.billedAmount,
-                );
-                return (
-                  <Link className="group relative overflow-hidden rounded-2xl border border-stone-200 bg-white p-6 shadow-[0_1px_2px_rgba(23,23,23,.04)] transition duration-300 before:absolute before:inset-x-0 before:top-0 before:h-1 before:origin-left before:scale-x-0 before:bg-[#f00073] before:transition-transform hover:-translate-y-1 hover:border-stone-300 hover:shadow-[0_20px_50px_rgba(23,23,23,.09)] hover:before:scale-x-100" href={`/projects/${project.id}`} key={project.id}>
-                    <div className="flex items-start justify-between gap-4"><span className="grid size-11 place-items-center rounded-xl bg-pink-50 text-pink-600"><FolderKanban aria-hidden="true" className="size-5" /></span><ArrowRight aria-hidden="true" className="size-5 text-slate-300 transition group-hover:translate-x-1 group-hover:text-pink-500" /></div>
-                    <h3 className="font-display mt-6 text-2xl leading-tight">{project.name}</h3>
-                    <p className="mt-1 line-clamp-2 min-h-10 text-sm leading-5 text-slate-500">{project.description ? markdownToPlainText(project.description) : "No description provided."}</p>
-                    {showFinancials && (Number(project.retainer_hours ?? 0) > 0 || Number(project.budget_amount ?? 0) > 0) && (
-                      <div className="mt-5 grid grid-cols-2 gap-3 rounded-xl bg-slate-50 p-3">
-                        <div>
-                          <p className="text-xs text-slate-500">Retainer available</p>
-                          <p className="mt-1 text-sm font-semibold text-slate-900">
-                            {remainingHours.toLocaleString("en-US", { maximumFractionDigits: 2 })}h
-                          </p>
-                        </div>
-                        <div>
-                          <p className="text-xs text-slate-500">Budget available</p>
-                          <p className="mt-1 text-sm font-semibold text-slate-900">
-                            {formatCurrency(remainingBudget, project.currency ?? "USD")}
-                          </p>
-                        </div>
-                      </div>
-                    )}
-                    <div className="mt-4 flex gap-4 border-t border-stone-100 pt-4 text-xs text-slate-500"><span>{count.total} {isClient ? "requests" : "tickets"}</span><span>{count.completed} {isClient ? "delivered" : "completed"}</span></div>
-                  </Link>
-                );
-              })}
-            </div>
-          ) : (
-            <div className="rounded-2xl border border-dashed border-slate-300 bg-white px-6 py-14 text-center"><FolderKanban aria-hidden="true" className="mx-auto size-8 text-slate-300" /><h3 className="mt-4 font-semibold">No projects yet</h3><p className="mt-1 text-sm text-slate-500">{role === "admin" ? "Create the first project above." : "An admin can add you to a project."}</p></div>
-          )}
-        </section>
+        <div className="border-b border-black/10 pb-8 sm:flex sm:items-end sm:justify-between"><div><p className="eyebrow">{isClient ? "Your client workspace" : isManagement ? "Delivery portfolio" : "Assigned workspaces"}</p><h1 className="mt-3 text-5xl leading-none sm:text-6xl">Projects</h1></div><div className="mt-5 flex flex-col items-start gap-4 sm:mt-0 sm:items-end"><p className="max-w-md text-sm leading-6 text-slate-600 sm:text-right">{isClient ? "Follow delivery, project health, and the capacity available for new requests." : isManagement ? "Manage commercial details, sprint capacity, delivery health, and access." : "Open your assigned projects to review delivery priorities, sprint dates, and active work."}</p>{role === "admin" && <ProjectComposer users={memberOptions} />}</div></div>
+        <section aria-labelledby="retainers-heading" className="mt-10"><div className="mb-4 flex items-end justify-between"><div><p className="eyebrow">Recurring partnerships</p><h2 className="font-display mt-2 text-3xl" id="retainers-heading">Retainers</h2></div><span className="text-sm text-slate-500">{retainers.length}</span></div>{projectGrid(retainers, "retainer")}</section>
+        <section aria-labelledby="new-builds-heading" className="mt-12"><div className="mb-4 flex items-end justify-between"><div><p className="eyebrow">Defined engagements</p><h2 className="font-display mt-2 text-3xl" id="new-builds-heading">New builds</h2></div><span className="text-sm text-slate-500">{newBuilds.length}</span></div>{projectGrid(newBuilds, "new_build")}</section>
       </div>
     </main>
   );

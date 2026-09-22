@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState, useTransition } from "react";
-import { ArrowLeft, ArrowRight, CircleDot, GripVertical, MessageSquare } from "lucide-react";
+import { Archive, ArrowLeft, ArrowRight, CircleDot, GripVertical, MessageSquare } from "lucide-react";
 import { moveTicketAction } from "@/app/projects/actions";
 import { Button } from "@/components/ui/button";
 import { markdownToPlainText } from "@/components/ui/markdown-content";
@@ -22,9 +22,11 @@ type Ticket = {
 
 const columns: Array<{ status: TicketStatus; label: string; dot: string }> = [
   { status: "backlog", label: "Backlog", dot: "bg-slate-400" },
+  { status: "pending_approval", label: "Pending approval", dot: "bg-amber-500" },
   { status: "in_progress", label: "In progress", dot: "bg-blue-500" },
+  { status: "client_uat", label: "Client UAT", dot: "bg-fuchsia-500" },
+  { status: "ready_for_deploy", label: "Ready for deploy", dot: "bg-cyan-500" },
   { status: "completed", label: "Completed", dot: "bg-emerald-500" },
-  { status: "archived", label: "Archived", dot: "bg-violet-500" },
 ];
 
 const priorityClasses: Record<TicketPriority, string> = {
@@ -46,7 +48,7 @@ export function KanbanBoard({ projectId, tickets: initialTickets, canManage, cli
   const [moveError, setMoveError] = useState<string>();
   const [isMoving, startTransition] = useTransition();
   const visibleColumns = clientView
-    ? columns.filter((column) => column.status !== "archived").map((column) => ({ ...column, label: column.status === "backlog" ? "Submitted" : column.status === "completed" ? "Delivered" : column.label }))
+    ? columns.map((column) => ({ ...column, label: column.status === "backlog" ? "Submitted" : column.status === "in_progress" ? "In delivery" : column.status === "client_uat" ? "Ready for review" : column.status === "ready_for_deploy" ? "Ready to deploy" : column.status === "completed" ? "Delivered" : column.label }))
     : columns;
 
   useEffect(() => setTickets(initialTickets), [initialTickets]);
@@ -84,7 +86,7 @@ export function KanbanBoard({ projectId, tickets: initialTickets, canManage, cli
         </p>
       )}
       {moveError && <p className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">{moveError}</p>}
-      <div className="grid items-start gap-5 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid items-start gap-5 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
         {visibleColumns.map((column, columnIndex) => {
           const columnTickets = tickets.filter((ticket) => ticket.status === column.status);
           const isActiveTarget = dropTarget === column.status;
@@ -157,6 +159,7 @@ export function KanbanBoard({ projectId, tickets: initialTickets, canManage, cli
                         <div className="flex gap-1">
                           {columnIndex > 0 && <Button aria-label={`Move ${ticket.title} left`} disabled={isMoving} onClick={() => moveTicket(ticket.id, visibleColumns[columnIndex - 1].status)} size="icon" type="button" variant="ghost"><ArrowLeft aria-hidden="true" /></Button>}
                           {columnIndex < visibleColumns.length - 1 && <Button aria-label={`Move ${ticket.title} right`} disabled={isMoving} onClick={() => moveTicket(ticket.id, visibleColumns[columnIndex + 1].status)} size="icon" type="button" variant="ghost"><ArrowRight aria-hidden="true" /></Button>}
+                          {column.status === "completed" && <Button aria-label={`Archive ${ticket.title}`} disabled={isMoving} onClick={() => moveTicket(ticket.id, "archived")} size="icon" title="Archive ticket" type="button" variant="ghost"><Archive aria-hidden="true" /></Button>}
                         </div>
                       )}
                     </div>

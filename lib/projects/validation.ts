@@ -1,4 +1,4 @@
-export const TICKET_STATUSES = ["backlog", "in_progress", "completed", "archived"] as const;
+export const TICKET_STATUSES = ["backlog", "pending_approval", "in_progress", "client_uat", "ready_for_deploy", "completed", "archived"] as const;
 export const TICKET_PRIORITIES = ["low", "medium", "high"] as const;
 export const TICKET_TYPES = ["new_feature", "feature_update", "bug"] as const;
 export const TICKET_PLATFORMS = ["desktop", "mobile", "tablet"] as const;

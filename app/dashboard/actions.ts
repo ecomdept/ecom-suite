@@ -4,7 +4,7 @@ import { headers } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireUser } from "@/lib/auth/session";
-import { isAppRole } from "@/lib/auth/roles";
+import { isAppRole, splitPrimaryRole } from "@/lib/auth/roles";
 import { validateEmail, validateFullName } from "@/lib/auth/validation";
 import { isUuid } from "@/lib/projects/validation";
 
@@ -15,6 +15,11 @@ export type InviteActionState = {
 
 export type DeleteUserActionState = {
   error?: string;
+};
+
+export type UpdateUserActionState = {
+  error?: string;
+  success?: string;
 };
 
 function getString(formData: FormData, key: string) {
@@ -37,11 +42,18 @@ export async function inviteUserAction(
   void previousState;
   const fullName = getString(formData, "fullName").trim();
   const email = getString(formData, "email").trim().toLowerCase();
-  const role = getString(formData, "role");
+  const selectedRoles = formData.getAll("roles").map(String);
   const validationError = validateFullName(fullName) ?? validateEmail(email);
 
   if (validationError) return { error: validationError };
-  if (!isAppRole(role)) return { error: "Select a valid account role." };
+  if (selectedRoles.some((role) => !isAppRole(role))) {
+    return { error: "Select valid account roles." };
+  }
+  const { primaryRole, additionalRoles } = splitPrimaryRole(selectedRoles);
+  if (!primaryRole) return { error: "Select at least one account role." };
+  if (selectedRoles.includes("client") && selectedRoles.length > 1) {
+    return { error: "Client access cannot be combined with agency roles." };
+  }
 
   const { supabase, claims } = await requireUser();
   const currentUserId = typeof claims.sub === "string" ? claims.sub : "";
@@ -99,7 +111,8 @@ export async function inviteUserAction(
   const { error: roleError } = await adminClient.from("user_roles").upsert(
     {
       user_id: invitation.user.id,
-      role,
+      role: primaryRole,
+      additional_roles: additionalRoles,
       assigned_by: currentUserId,
     },
     { onConflict: "user_id" },
@@ -114,6 +127,59 @@ export async function inviteUserAction(
 
   revalidatePath("/dashboard");
   return { success: `Invitation sent to ${email}.` };
+}
+
+export async function updateUserAction(previousState: UpdateUserActionState, formData: FormData): Promise<UpdateUserActionState> {
+  void previousState;
+  const targetUserId = getString(formData, "userId");
+  const fullName = getString(formData, "fullName").trim();
+  const email = getString(formData, "email").trim().toLowerCase();
+  const selectedRoles = formData.getAll("roles").map(String);
+  const validationError = validateFullName(fullName) ?? validateEmail(email);
+  if (!isUuid(targetUserId)) return { error: "Invalid user." };
+  if (validationError) return { error: validationError };
+  if (selectedRoles.some((role) => !isAppRole(role))) {
+    return { error: "Select valid account roles." };
+  }
+  const { primaryRole, additionalRoles } = splitPrimaryRole(selectedRoles);
+  if (!primaryRole) return { error: "Select at least one role." };
+  if (selectedRoles.includes("client") && selectedRoles.length > 1) return { error: "Client access cannot be combined with agency roles." };
+
+  const { supabase, claims } = await requireUser();
+  const currentUserId = typeof claims.sub === "string" ? claims.sub : "";
+  const { data: currentRole } = await supabase.from("user_roles").select("role").eq("user_id", currentUserId).maybeSingle();
+  if (currentRole?.role !== "admin") return { error: "Only administrators can update users." };
+  if (targetUserId === currentUserId && primaryRole !== "admin") return { error: "You cannot remove your own administrator access." };
+
+  let adminClient;
+  try {
+    adminClient = createAdminClient();
+  } catch {
+    return { error: "User management is not configured on this server." };
+  }
+
+  const { data: existingUser, error: readError } = await adminClient.auth.admin.getUserById(targetUserId);
+  if (readError || !existingUser.user) return { error: "The user account could not be loaded." };
+  const currentMetadata = existingUser.user.user_metadata && typeof existingUser.user.user_metadata === "object" ? existingUser.user.user_metadata : {};
+  const { error: authError } = await adminClient.auth.admin.updateUserById(targetUserId, {
+    email,
+    email_confirm: true,
+    user_metadata: { ...currentMetadata, full_name: fullName },
+  });
+  if (authError) {
+    if (authError.message.toLowerCase().includes("already")) return { error: "That email address is already used by another account." };
+    return { error: `The login account could not be updated: ${authError.message}` };
+  }
+
+  const [{ error: profileError }, { error: roleError }] = await Promise.all([
+    adminClient.from("profiles").update({ full_name: fullName }).eq("id", targetUserId),
+    adminClient.from("user_roles").upsert({ user_id: targetUserId, role: primaryRole, additional_roles: additionalRoles, assigned_by: currentUserId }, { onConflict: "user_id" }),
+  ]);
+  if (profileError || roleError) return { error: "The login was updated, but profile or role changes could not be saved. Confirm migration 20261005140000 is applied." };
+  revalidatePath("/dashboard");
+  revalidatePath("/projects");
+  revalidatePath("/crm");
+  return { success: "User information and roles updated." };
 }
 
 export async function deleteUserAction(

@@ -1,8 +1,9 @@
 import { Users } from "lucide-react";
 import { requireUser } from "@/lib/auth/session";
-import { isAppRole, ROLE_LABELS } from "@/lib/auth/roles";
+import { isAppRole, ROLE_LABELS, type AppRole } from "@/lib/auth/roles";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { DeleteUserButton } from "@/components/dashboard/delete-user-button";
+import { EditUserDialog } from "@/components/dashboard/edit-user-dialog";
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat("en", {
@@ -60,11 +61,11 @@ export async function AdminUserList() {
   const [{ data: profiles }, { data: roleRows }] = userIds.length
     ? await Promise.all([
         adminClient.from("profiles").select("id, full_name").in("id", userIds),
-        adminClient.from("user_roles").select("user_id, role").in("user_id", userIds),
+        adminClient.from("user_roles").select("user_id, role, additional_roles").in("user_id", userIds),
       ])
     : [{ data: [] }, { data: [] }];
   const profileById = new Map(profiles?.map((profile) => [profile.id, profile]));
-  const roleById = new Map(roleRows?.map((role) => [role.user_id, role.role]));
+  const rolesById = new Map(roleRows?.map((row) => [row.user_id, [row.role, ...(row.additional_roles ?? [])].filter((role): role is AppRole => typeof role === "string" && isAppRole(role))]));
 
   return (
     <section
@@ -96,7 +97,7 @@ export async function AdminUserList() {
           <thead className="border-b border-stone-100 bg-slate-50/70 text-xs uppercase tracking-wider text-slate-500">
             <tr>
               <th className="px-5 py-3 font-semibold sm:px-7" scope="col">User</th>
-              <th className="px-5 py-3 font-semibold" scope="col">Role</th>
+              <th className="px-5 py-3 font-semibold" scope="col">Roles</th>
               <th className="px-5 py-3 font-semibold" scope="col">Status</th>
               <th className="px-5 py-3 font-semibold sm:pr-7" scope="col">Added</th>
               <th className="px-5 py-3 text-right font-semibold sm:pr-7" scope="col">Actions</th>
@@ -113,8 +114,7 @@ export async function AdminUserList() {
                 metadataName ||
                 user.email?.split("@")[0] ||
                 "Unknown user";
-              const role = roleById.get(user.id);
-              const roleLabel = role && isAppRole(role) ? ROLE_LABELS[role] : "Not assigned";
+              const roles = rolesById.get(user.id) ?? [];
               const confirmed = Boolean(user.email_confirmed_at ?? user.confirmed_at);
 
               return (
@@ -131,9 +131,7 @@ export async function AdminUserList() {
                     </div>
                   </td>
                   <td className="px-5 py-4">
-                    <span className="rounded-full bg-stone-100 px-2.5 py-1 text-xs font-medium text-slate-700">
-                      {roleLabel}
-                    </span>
+                    <div className="flex flex-wrap gap-1.5">{roles.length ? roles.map((role) => <span className="rounded-full bg-stone-100 px-2.5 py-1 text-xs font-medium text-slate-700" key={role}>{ROLE_LABELS[role]}</span>) : <span className="text-xs text-slate-400">Not assigned</span>}</div>
                   </td>
                   <td className="px-5 py-4">
                     <span className={`inline-flex items-center gap-2 text-xs font-medium ${confirmed ? "text-emerald-700" : "text-amber-700"}`}>
@@ -145,11 +143,7 @@ export async function AdminUserList() {
                     {formatDate(user.created_at)}
                   </td>
                   <td className="px-5 py-4 text-right sm:pr-7">
-                    {user.id === currentUserId ? (
-                      <span className="text-xs font-medium text-slate-400">You</span>
-                    ) : (
-                      <div className="flex justify-end"><DeleteUserButton userId={user.id} userName={name} /></div>
-                    )}
+                    <div className="flex justify-end gap-2"><EditUserDialog email={user.email ?? ""} fullName={name} isCurrentUser={user.id === currentUserId} roles={roles} userId={user.id}/>{user.id === currentUserId ? <span className="self-center text-xs font-medium text-slate-400">You</span> : <DeleteUserButton userId={user.id} userName={name}/>}</div>
                   </td>
                 </tr>
               );

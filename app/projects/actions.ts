@@ -9,7 +9,6 @@ import {
   isTicketType,
   isTicketPlatform,
   isUuid,
-  isCurrency,
   parseOptionalNonnegativeNumber,
   validateDescription,
   validateComment,
@@ -33,9 +32,34 @@ function getOptionalString(formData: FormData, key: string) {
   return getString(formData, key).trim() || null;
 }
 
-function isIsoDate(value: string | null) {
-  return value === null || /^\d{4}-\d{2}-\d{2}$/.test(value);
+function getBoolean(formData: FormData, key: string) {
+  return formData.get(key) === "on" || formData.get(key) === "true";
 }
+
+function isIsoDate(value: string | null) {
+  if (value === null) return true;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+}
+
+function isProjectType(value: string): value is "retainer" | "new_build" {
+  return value === "retainer" || value === "new_build";
+}
+
+function isProjectStatus(value: string): value is "active" | "on_hold" | "completed" {
+  return value === "active" || value === "on_hold" || value === "completed";
+}
+
+function isProjectRisk(value: string): value is "on_track" | "at_risk" | "off_track" {
+  return value === "on_track" || value === "at_risk" || value === "off_track";
+}
+
+const projectLogoTypes = new Map([
+  ["image/jpeg", "jpg"],
+  ["image/png", "png"],
+  ["image/webp", "webp"],
+]);
 
 async function getCurrentRole() {
   const { supabase, claims } = await requireUser();
@@ -56,16 +80,26 @@ export async function createProjectAction(
   void previousState;
   const name = getString(formData, "name").trim();
   const description = getString(formData, "description").trim();
+  const projectType = getString(formData, "projectType");
   const memberIds = [...new Set(formData.getAll("members").map(String).filter(isUuid))];
   const retainerHours = parseOptionalNonnegativeNumber(getString(formData, "retainerHours"), 100000);
-  const budgetAmount = parseOptionalNonnegativeNumber(getString(formData, "budgetAmount"), 1000000000);
-  const currency = getString(formData, "currency").trim().toUpperCase() || "USD";
+  const hourlyRate = parseOptionalNonnegativeNumber(getString(formData, "hourlyRate"), 1000000);
+  const sprintStartDate = getOptionalString(formData, "sprintStartDate");
+  const repositoryUrl = getOptionalString(formData, "repositoryUrl");
+  const logoValue = formData.get("clientLogo");
+  const clientLogo = logoValue && typeof logoValue !== "string" && logoValue.size > 0 ? logoValue : null;
   const validationError = validateProjectName(name) ?? validateDescription(description);
 
   if (validationError) return { error: validationError };
-  if (retainerHours === undefined) return { error: "Enter a valid retainer amount." };
-  if (budgetAmount === undefined) return { error: "Enter a valid project budget." };
-  if (!isCurrency(currency)) return { error: "Currency must be a three-letter code such as USD." };
+  if (!isProjectType(projectType)) return { error: "Select a valid project type." };
+  if (retainerHours === undefined) return { error: "Enter valid sprint hours." };
+  if (hourlyRate === undefined) return { error: "Enter a valid hourly rate." };
+  if (!sprintStartDate || !isIsoDate(sprintStartDate)) return { error: "Select a valid sprint starting date." };
+  const repositoryError = validateOptionalUrl(repositoryUrl ?? "", "GitHub repository URL");
+  if (repositoryError) return { error: repositoryError };
+  if (clientLogo && (!projectLogoTypes.has(clientLogo.type) || clientLogo.size > 1024 * 1024)) {
+    return { error: "Upload a PNG, JPG, or WebP logo no larger than 1 MB." };
+  }
 
   const { supabase, userId, role } = await getCurrentRole();
   if (role !== "admin") return { error: "Only administrators can create projects." };
@@ -76,9 +110,12 @@ export async function createProjectAction(
       name,
       description: description || null,
       created_by: userId,
-      retainer_hours: retainerHours,
-      budget_amount: budgetAmount,
-      currency,
+      project_type: projectType,
+      retainer_hours: projectType === "retainer" ? retainerHours : null,
+      hourly_rate: hourlyRate,
+      sprint_start_date: sprintStartDate,
+      repository_url: repositoryUrl,
+      currency: "USD",
     })
     .select("id")
     .single();
@@ -97,9 +134,34 @@ export async function createProjectAction(
   );
 
   if (membershipError) {
+    await supabase.from("projects").delete().eq("id", project.id);
     return {
-      error: "The project was created, but its members could not be assigned. Open the project and try again.",
+      error: "The project could not be created because its members could not be assigned.",
     };
+  }
+
+  if (clientLogo) {
+    const extension = projectLogoTypes.get(clientLogo.type);
+    const logoPath = `${project.id}/${crypto.randomUUID()}.${extension}`;
+    const { error: uploadError } = await supabase.storage
+      .from("project-logos")
+      .upload(logoPath, clientLogo, { contentType: clientLogo.type, upsert: false });
+
+    if (uploadError) {
+      await supabase.from("projects").delete().eq("id", project.id);
+      return { error: "The logo could not be uploaded, so the project was not created." };
+    }
+
+    const { data: publicLogo } = supabase.storage.from("project-logos").getPublicUrl(logoPath);
+    const { error: logoUpdateError } = await supabase
+      .from("projects")
+      .update({ client_logo_url: publicLogo.publicUrl })
+      .eq("id", project.id);
+    if (logoUpdateError) {
+      await supabase.storage.from("project-logos").remove([logoPath]);
+      await supabase.from("projects").delete().eq("id", project.id);
+      return { error: "The logo could not be linked, so the project was not created." };
+    }
   }
 
   revalidatePath("/projects");
@@ -193,8 +255,157 @@ export async function createTicketAction(
   }
 
   revalidatePath(`/projects/${projectId}`);
+  revalidatePath("/dashboard");
   revalidatePath("/my-tasks");
   return { success: "Ticket added to the backlog." };
+}
+
+export async function submitTicketForApprovalAction(
+  previousState: ProjectActionState,
+  formData: FormData,
+): Promise<ProjectActionState> {
+  void previousState;
+  const projectId = getString(formData, "projectId");
+  const ticketId = getString(formData, "ticketId");
+  const workCategory = getString(formData, "workCategory");
+  const estimatedHours = parseOptionalNonnegativeNumber(getString(formData, "estimatedHours"), 100000);
+  if (!isUuid(projectId) || !isUuid(ticketId)) return { error: "Invalid ticket." };
+  if (workCategory !== "admin_work" && workCategory !== "dev_work") return { error: "Choose admin or development work." };
+  if (estimatedHours === undefined || estimatedHours === null || estimatedHours <= 0) return { error: "Add an estimate greater than zero." };
+
+  const { supabase, role } = await getCurrentRole();
+  if (role !== "admin" && role !== "project_manager") return { error: "Only administrators and project managers can request approval." };
+  const { error } = await supabase.rpc("prepare_ticket_for_approval", {
+    target_ticket_id: ticketId,
+    target_project_id: projectId,
+    next_work_category: workCategory,
+    next_estimated_hours: estimatedHours,
+  });
+  if (error) {
+    console.error("prepare_ticket_for_approval failed", { code: error.code, message: error.message });
+    if (error.code === "PGRST202" || error.code === "42883") return { error: "Apply the latest ticket workflow migration, then try again." };
+    if (error.code === "42703" && error.message.includes("subtask_type")) return { error: "The ticket subtask workflow columns are missing. Apply migration 20261005030000, then try again." };
+    if (error.code === "42704") return { error: "The core ticket workflow schema is missing. Reapply migration 20261005010000, then try again." };
+    if (error.code === "22P02" && error.message.includes("ticket_status")) return { error: "The approval and UAT ticket statuses are missing. Apply migration 20261005000000 in a separate SQL run, then try again." };
+    if (error.code === "42501" || error.message.toLowerCase().includes("project managers")) return { error: "You no longer have permission to manage this ticket." };
+    return { error: "The approval workflow could not be prepared. Check the server log for the database error." };
+  }
+  revalidatePath(`/projects/${projectId}`);
+  revalidatePath(`/projects/${projectId}/tickets/${ticketId}`);
+  revalidatePath("/dashboard");
+  return { success: "Estimate sent to the client for approval." };
+}
+
+export async function requestEstimateIncreaseAction(
+  previousState: ProjectActionState,
+  formData: FormData,
+): Promise<ProjectActionState> {
+  void previousState;
+  const projectId = getString(formData, "projectId");
+  const ticketId = getString(formData, "ticketId");
+  const estimatedHours = parseOptionalNonnegativeNumber(
+    getString(formData, "estimatedHours"),
+    100000,
+  );
+
+  if (!isUuid(projectId) || !isUuid(ticketId)) {
+    return { error: "Invalid ticket." };
+  }
+  if (
+    estimatedHours === undefined ||
+    estimatedHours === null ||
+    estimatedHours <= 0
+  ) {
+    return { error: "Enter a valid revised estimate." };
+  }
+
+  const { supabase, role } = await getCurrentRole();
+  if (role !== "admin" && role !== "project_manager") {
+    return { error: "Only administrators and project managers can request an estimate increase." };
+  }
+
+  const { error } = await supabase.rpc("request_ticket_estimate_increase", {
+    target_ticket_id: ticketId,
+    target_project_id: projectId,
+    next_estimated_hours: estimatedHours,
+  });
+
+  if (error) {
+    console.error("request_ticket_estimate_increase failed", {
+      code: error.code,
+      message: error.message,
+    });
+    if (error.code === "PGRST202" || error.code === "42883") {
+      return {
+        error:
+          "Apply migration 20261005150000, then request the estimate increase again.",
+      };
+    }
+    if (error.message.toLowerCase().includes("greater than")) {
+      return { error: "The revised estimate must be greater than the current estimate." };
+    }
+    if (error.message.toLowerCase().includes("active delivery")) {
+      return { error: "Estimate increases can only be requested while the ticket is in active delivery." };
+    }
+    return { error: "The estimate increase could not be sent for approval." };
+  }
+
+  revalidatePath(`/projects/${projectId}`);
+  revalidatePath(`/projects/${projectId}/tickets/${ticketId}`);
+  revalidatePath("/dashboard");
+  return { success: "The revised estimate was sent to the client for approval." };
+}
+
+export async function respondToEstimateAction(previousState: ProjectActionState, formData: FormData): Promise<ProjectActionState> {
+  void previousState;
+  const projectId = getString(formData, "projectId");
+  const ticketId = getString(formData, "ticketId");
+  const approve = getString(formData, "decision") === "approve";
+  const isIncrease = getString(formData, "estimateKind") === "increase";
+  if (!isUuid(projectId) || !isUuid(ticketId)) return { error: "Invalid ticket." };
+  const { supabase, role } = await getCurrentRole();
+  if (role !== "client") return { error: "Only a client assigned to this project can respond to the estimate." };
+  const { error } = await supabase.rpc("respond_to_ticket_estimate", { target_ticket_id: ticketId, approve });
+  if (error) {
+    console.error("respond_to_ticket_estimate failed", { code: error.code, message: error.message });
+    if (error.code === "PGRST202" || error.code === "42883") return { error: "Apply the latest estimate-decision migration, then try again." };
+    return { error: "The estimate decision could not be saved. Check the server log for the database error." };
+  }
+  revalidatePath(`/projects/${projectId}/tickets/${ticketId}`);
+  revalidatePath("/dashboard");
+  revalidatePath("/my-tasks");
+  return {
+    success: approve
+      ? isIncrease
+        ? "The revised estimate was approved."
+        : "Estimate approved. The ticket is now in delivery."
+      : isIncrease
+        ? "The increase was declined. The original estimate remains in place."
+        : "Changes requested. The ticket was returned to the PM.",
+  };
+}
+
+export async function respondToUatAction(previousState: ProjectActionState, formData: FormData): Promise<ProjectActionState> {
+  void previousState;
+  const projectId = getString(formData, "projectId");
+  const ticketId = getString(formData, "ticketId");
+  const approve = getString(formData, "decision") === "approve";
+  const feedback = getString(formData, "feedback").trim();
+  if (!isUuid(projectId) || !isUuid(ticketId)) return { error: "Invalid ticket." };
+  if (!approve && !feedback) return { error: "Describe what needs to change before sending the ticket back." };
+  const feedbackError = validateLongText(feedback, "Client feedback", 2000);
+  if (feedbackError) return { error: feedbackError };
+  const { supabase, role } = await getCurrentRole();
+  if (role !== "client") return { error: "Only the requesting client can complete UAT." };
+  const { error } = await supabase.rpc("respond_to_ticket_uat", { target_ticket_id: ticketId, approve, client_feedback: feedback || null });
+  if (error) {
+    if (error.code === "PGRST202" || error.code === "42883") return { error: "Apply the latest UAT workflow migration, then try again." };
+    return { error: approve ? "The ticket could not be accepted." : "Your feedback could not be submitted." };
+  }
+  revalidatePath(`/projects/${projectId}/tickets/${ticketId}`);
+  revalidatePath("/dashboard");
+  revalidatePath("/my-tasks");
+  return { success: approve ? "UAT accepted. The ticket is ready for deployment." : "Feedback submitted and the ticket returned to delivery." };
 }
 
 export async function moveTicketAction(formData: FormData): Promise<ProjectActionState> {
@@ -283,8 +494,16 @@ export async function deleteProjectAction(
   const { supabase, role } = await getCurrentRole();
   if (role !== "admin") return { error: "Only administrators can delete projects." };
 
+  const { data: project } = await supabase.from("projects").select("client_logo_url").eq("id", projectId).maybeSingle();
   const { error } = await supabase.from("projects").delete().eq("id", projectId);
   if (error) return { error: "The project could not be deleted." };
+
+  const logoMarker = "/project-logos/";
+  const logoUrl = project?.client_logo_url;
+  if (logoUrl?.includes(logoMarker)) {
+    const logoPath = decodeURIComponent(logoUrl.split(logoMarker)[1]?.split("?")[0] ?? "");
+    if (logoPath) await supabase.storage.from("project-logos").remove([logoPath]);
+  }
 
   revalidatePath("/projects");
   revalidatePath("/my-tasks");
@@ -297,11 +516,12 @@ export async function updateProjectMembersAction(
 ): Promise<ProjectActionState> {
   void previousState;
   const projectId = getString(formData, "projectId");
-  const desiredMemberIds = [...new Set(formData.getAll("members").map(String).filter(isUuid))];
+  const requestedMemberIds = [...new Set(formData.getAll("members").map(String).filter(isUuid))];
   if (!isUuid(projectId)) return { error: "Invalid project." };
 
   const { supabase, userId, role } = await getCurrentRole();
-  if (role !== "admin") return { error: "Only administrators can manage project access." };
+  if (role !== "admin" && role !== "project_manager") return { error: "Only administrators and project managers can manage project access." };
+  const desiredMemberIds = requestedMemberIds;
 
   const { data: existing, error: readError } = await supabase
     .from("project_members")
@@ -341,38 +561,50 @@ export async function updateProjectSettingsAction(
 ): Promise<ProjectActionState> {
   void previousState;
   const projectId = getString(formData, "projectId");
+  const projectType = getString(formData, "projectType");
   const retainerHours = parseOptionalNonnegativeNumber(getString(formData, "retainerHours"), 100000);
-  const budgetAmount = parseOptionalNonnegativeNumber(getString(formData, "budgetAmount"), 1000000000);
-  const currency = getString(formData, "currency").trim().toUpperCase();
-  const periodStart = getString(formData, "periodStart") || null;
-  const periodEnd = getString(formData, "periodEnd") || null;
+  const hourlyRate = parseOptionalNonnegativeNumber(getString(formData, "hourlyRate"), 1000000);
+  const sprintStartDate = getOptionalString(formData, "sprintStartDate");
+  const repositoryUrl = getOptionalString(formData, "repositoryUrl");
+  const status = getString(formData, "status");
+  const risk = getString(formData, "risk");
+  const rolloverEnabled = getBoolean(formData, "rolloverEnabled");
+  const rolloverCapHours = parseOptionalNonnegativeNumber(getString(formData, "rolloverCapHours"), 100000);
 
   if (!isUuid(projectId)) return { error: "Invalid project." };
+  if (!isProjectType(projectType)) return { error: "Select a valid project type." };
   if (retainerHours === undefined) return { error: "Enter valid retainer hours." };
-  if (budgetAmount === undefined) return { error: "Enter a valid budget." };
-  if (!isCurrency(currency)) return { error: "Currency must be a three-letter code such as USD." };
-  if (periodStart && periodEnd && periodEnd < periodStart) {
-    return { error: "The period end date must be on or after the start date." };
-  }
+  if (hourlyRate === undefined) return { error: "Enter a valid hourly rate." };
+  if (rolloverCapHours === undefined) return { error: "Enter a valid rollover cap." };
+  if (!sprintStartDate || !isIsoDate(sprintStartDate)) return { error: "Select a valid sprint starting date." };
+  if (!isProjectStatus(status)) return { error: "Select a valid project status." };
+  if (!isProjectRisk(risk)) return { error: "Select a valid risk level." };
+  const repositoryError = validateOptionalUrl(repositoryUrl ?? "", "GitHub repository URL");
+  if (repositoryError) return { error: repositoryError };
 
   const { supabase, role } = await getCurrentRole();
-  if (role !== "admin") return { error: "Only administrators can update project settings." };
+  if (role !== "admin" && role !== "project_manager") return { error: "Only administrators and project managers can update project settings." };
 
   const { error } = await supabase
     .from("projects")
     .update({
-      retainer_hours: retainerHours,
-      budget_amount: budgetAmount,
-      currency,
-      retainer_period_start: periodStart,
-      retainer_period_end: periodEnd,
+      project_type: projectType,
+      retainer_hours: projectType === "retainer" ? retainerHours : null,
+      hourly_rate: hourlyRate,
+      sprint_start_date: sprintStartDate,
+      repository_url: repositoryUrl,
+      status,
+      risk,
+      currency: "USD",
+      rollover_enabled: projectType === "retainer" && rolloverEnabled,
+      rollover_cap_hours: projectType === "retainer" && rolloverEnabled ? rolloverCapHours : null,
     })
     .eq("id", projectId);
-  if (error) return { error: "Project settings could not be updated." };
+  if (error) return { error: "Project settings could not be updated. Confirm you manage this project." };
 
   revalidatePath(`/projects/${projectId}`);
   revalidatePath("/projects");
-  return { success: "Retainer and budget settings updated." };
+  return { success: "Project delivery settings updated." };
 }
 
 export async function updateTicketUsageAction(
@@ -382,13 +614,11 @@ export async function updateTicketUsageAction(
   void previousState;
   const projectId = getString(formData, "projectId");
   const ticketId = getString(formData, "ticketId");
-  const estimatedHours = parseOptionalNonnegativeNumber(getString(formData, "estimatedHours"), 100000);
   const loggedHours = parseOptionalNonnegativeNumber(getString(formData, "loggedHours"), 100000);
-  const billableAmount = parseOptionalNonnegativeNumber(getString(formData, "billableAmount"), 1000000000);
 
   if (!isUuid(projectId) || !isUuid(ticketId)) return { error: "Invalid ticket." };
-  if (estimatedHours === undefined || loggedHours === undefined || billableAmount === undefined) {
-    return { error: "Hours and billable amount must be valid nonnegative numbers." };
+  if (loggedHours === undefined) {
+    return { error: "Logged hours must be a valid nonnegative number." };
   }
 
   const { supabase, role } = await getCurrentRole();
@@ -396,12 +626,14 @@ export async function updateTicketUsageAction(
     return { error: "You do not have permission to update ticket usage." };
   }
 
+  const { data: project } = await supabase.from("projects").select("hourly_rate").eq("id", projectId).maybeSingle();
+  const hourlyRate = Number(project?.hourly_rate ?? 0);
+
   const { error } = await supabase
     .from("tickets")
     .update({
-      estimated_hours: estimatedHours ?? 0,
       logged_hours: loggedHours ?? 0,
-      billable_amount: billableAmount ?? 0,
+      billable_amount: (loggedHours ?? 0) * hourlyRate,
     })
     .eq("id", ticketId)
     .eq("project_id", projectId);
@@ -409,6 +641,7 @@ export async function updateTicketUsageAction(
 
   revalidatePath(`/projects/${projectId}`);
   revalidatePath(`/projects/${projectId}/tickets/${ticketId}`);
+  revalidatePath("/dashboard");
   revalidatePath("/my-tasks");
   return { success: "Ticket usage updated." };
 }
@@ -500,6 +733,7 @@ export async function updateTicketDetailsAction(
 
   revalidatePath(`/projects/${projectId}`);
   revalidatePath(`/projects/${projectId}/tickets/${ticketId}`);
+  revalidatePath("/dashboard");
   revalidatePath("/my-tasks");
   return { success: "Ticket details updated." };
 }
@@ -554,15 +788,85 @@ export async function setSubtaskCompletionAction(formData: FormData): Promise<vo
 
   const { supabase, role } = await getCurrentRole();
   if (!role || role === "client") return;
-  const { error } = await supabase
+  const { data: currentSubtask } = await supabase.from("ticket_subtasks").select("subtask_type, title, is_internal").eq("id", subtaskId).eq("ticket_id", ticketId).maybeSingle();
+  // Development completion must go through completeDevSubtaskAction so its
+  // required handoff links are validated on the server.
+  if (isCompleted && currentSubtask?.subtask_type === "dev") return;
+  const { data: updatedSubtask, error } = await supabase
     .from("ticket_subtasks")
     .update({ is_completed: isCompleted })
     .eq("id", subtaskId)
-    .eq("ticket_id", ticketId);
+    .eq("ticket_id", ticketId)
+    .select("subtask_type, title, is_internal")
+    .maybeSingle();
   if (error) return;
 
+  if (isCompleted && updatedSubtask?.subtask_type === "qa") {
+    const { data: ticket } = await supabase.from("tickets").select("created_by").eq("id", ticketId).maybeSingle();
+    await supabase.from("tickets").update({ status: "client_uat", approval_status: "uat_pending", uat_requested_at: new Date().toISOString(), assignee_id: ticket?.created_by ?? null }).eq("id", ticketId);
+  }
+  if (isCompleted && !updatedSubtask?.is_internal && updatedSubtask?.title === "Client feedback") {
+    const { data: ticket } = await supabase.from("tickets").select("created_by").eq("id", ticketId).maybeSingle();
+    await supabase.from("tickets").update({ status: "client_uat", approval_status: "uat_pending", uat_requested_at: new Date().toISOString(), uat_approved_at: null, assignee_id: ticket?.created_by ?? null }).eq("id", ticketId);
+  }
+  if (isCompleted && updatedSubtask?.subtask_type === "dev") {
+    const { data: qaStep } = await supabase.from("ticket_subtasks").select("assignee_id").eq("ticket_id", ticketId).eq("subtask_type", "qa").maybeSingle();
+    await supabase.from("tickets").update({ status: "in_progress", assignee_id: qaStep?.assignee_id ?? null }).eq("id", ticketId);
+  }
+  if (isCompleted && updatedSubtask?.subtask_type === "deploy") {
+    const { data: ticket } = await supabase.from("tickets").select("approval_status").eq("id", ticketId).maybeSingle();
+    if (ticket?.approval_status === "uat_approved") await supabase.from("tickets").update({ status: "completed", assignee_id: null }).eq("id", ticketId);
+  }
+
   revalidatePath(`/projects/${projectId}/tickets/${ticketId}`);
+  revalidatePath(`/projects/${projectId}`);
+  revalidatePath("/dashboard");
   revalidatePath("/my-tasks");
+}
+
+export async function completeDevSubtaskAction(
+  previousState: ProjectActionState,
+  formData: FormData,
+): Promise<ProjectActionState> {
+  void previousState;
+  const projectId = getString(formData, "projectId");
+  const ticketId = getString(formData, "ticketId");
+  const subtaskId = getString(formData, "subtaskId");
+  const pullRequestUrl = getString(formData, "pullRequestUrl").trim();
+  const previewUrl = getString(formData, "previewUrl").trim();
+  const devNotes = getOptionalString(formData, "devNotes");
+  if (!isUuid(projectId) || !isUuid(ticketId) || !isUuid(subtaskId)) return { error: "Invalid development task." };
+  if (!pullRequestUrl) return { error: "A pull request link is required." };
+  if (!previewUrl) return { error: "A preview link is required." };
+  const validationError = validateOptionalUrl(pullRequestUrl, "Pull request URL")
+    ?? validateOptionalUrl(previewUrl, "Preview URL")
+    ?? validateLongText(devNotes ?? "", "Development notes", 10000);
+  if (validationError) return { error: validationError };
+
+  const { supabase, userId, role } = await getCurrentRole();
+  if (role !== "developer" && role !== "admin" && role !== "project_manager") return { error: "Only the assigned developer or a project manager can complete development." };
+  const { data: subtask } = await supabase.from("ticket_subtasks").select("assignee_id, subtask_type").eq("id", subtaskId).eq("ticket_id", ticketId).maybeSingle();
+  if (!subtask || subtask.subtask_type !== "dev") return { error: "This is not a development workflow task." };
+  if (role === "developer" && subtask.assignee_id !== userId) return { error: "Only the developer assigned to this task can complete it." };
+
+  const { error } = await supabase.from("ticket_subtasks").update({
+    is_completed: true,
+    dev_pr_url: pullRequestUrl,
+    dev_preview_url: previewUrl,
+    dev_notes: devNotes,
+  }).eq("id", subtaskId).eq("ticket_id", ticketId);
+  if (error) {
+    if (error.code === "42703" || error.code === "PGRST204") return { error: "Apply migration 20261005040000 before completing development." };
+    return { error: "The development handoff could not be saved." };
+  }
+
+  const { data: qaStep } = await supabase.from("ticket_subtasks").select("assignee_id").eq("ticket_id", ticketId).eq("subtask_type", "qa").maybeSingle();
+  await supabase.from("tickets").update({ preview_url: previewUrl, repository_url: pullRequestUrl, dev_notes: devNotes, status: "in_progress", assignee_id: qaStep?.assignee_id ?? null }).eq("id", ticketId).eq("project_id", projectId);
+  revalidatePath(`/projects/${projectId}/tickets/${ticketId}`);
+  revalidatePath(`/projects/${projectId}`);
+  revalidatePath("/dashboard");
+  revalidatePath("/my-tasks");
+  return { success: "Development completed and handed off to QA." };
 }
 
 export async function updateSubtaskAction(formData: FormData): Promise<void> {
@@ -590,6 +894,8 @@ export async function updateSubtaskAction(formData: FormData): Promise<void> {
   if (error) return;
 
   revalidatePath(`/projects/${projectId}/tickets/${ticketId}`);
+  revalidatePath(`/projects/${projectId}`);
+  revalidatePath("/dashboard");
   revalidatePath("/my-tasks");
 }
 
@@ -609,5 +915,7 @@ export async function deleteSubtaskAction(formData: FormData): Promise<void> {
   if (error) return;
 
   revalidatePath(`/projects/${projectId}/tickets/${ticketId}`);
+  revalidatePath(`/projects/${projectId}`);
+  revalidatePath("/dashboard");
   revalidatePath("/my-tasks");
 }

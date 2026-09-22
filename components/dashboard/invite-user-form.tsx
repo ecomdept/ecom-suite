@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 import { Loader2, Send } from "lucide-react";
 import {
   inviteUserAction,
@@ -10,7 +10,7 @@ import { FormMessage } from "@/components/auth/form-message";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { APP_ROLES, ROLE_LABELS } from "@/lib/auth/roles";
+import { APP_ROLES, ROLE_LABELS, type AppRole } from "@/lib/auth/roles";
 
 const initialState: InviteActionState = {};
 
@@ -19,6 +19,17 @@ export function InviteUserForm() {
     inviteUserAction,
     initialState,
   );
+  const [selectedRoles, setSelectedRoles] = useState<AppRole[]>(["developer"]);
+
+  function toggleRole(role: AppRole, checked: boolean) {
+    setSelectedRoles((current) =>
+      checked
+        ? [...new Set([...current, role])]
+        : current.filter((item) => item !== role),
+    );
+  }
+
+  const clientSelected = selectedRoles.includes("client");
 
   return (
     <form action={formAction} className="grid gap-5">
@@ -50,25 +61,42 @@ export function InviteUserForm() {
           />
         </div>
       </div>
-      <div className="space-y-2">
-        <Label htmlFor="invite-role">Account role</Label>
-        <select
-          className="flex h-11 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-sm outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-          defaultValue="developer"
-          id="invite-role"
-          name="role"
-          required
-        >
-          {APP_ROLES.map((role) => (
-            <option key={role} value={role}>
-              {ROLE_LABELS[role]}
-            </option>
-          ))}
-        </select>
+      <fieldset className="space-y-3">
+        <legend className="text-sm font-medium">Account roles</legend>
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+          {APP_ROLES.map((role) => {
+            const disabled =
+              (clientSelected && role !== "client") ||
+              (!clientSelected &&
+                role === "client" &&
+                selectedRoles.length > 0);
+
+            return (
+              <label
+                className={`flex items-center gap-3 rounded-lg border px-3 py-3 text-sm ${disabled ? "cursor-not-allowed bg-stone-50 text-slate-400" : "cursor-pointer bg-white hover:border-pink-200"}`}
+                key={role}
+              >
+                <input
+                  checked={selectedRoles.includes(role)}
+                  className="size-4 rounded border-stone-300 text-pink-600 focus:ring-pink-600"
+                  disabled={disabled}
+                  name="roles"
+                  onChange={(event) =>
+                    toggleRole(role, event.target.checked)
+                  }
+                  type="checkbox"
+                  value={role}
+                />
+                <span>{ROLE_LABELS[role]}</span>
+              </label>
+            );
+          })}
+        </div>
         <p className="text-xs text-slate-500">
-          This role controls account access and can only be changed by an admin.
+          Agency users can have several responsibilities. Client access remains
+          separate to preserve client-only navigation and permissions.
         </p>
-      </div>
+      </fieldset>
 
       <FormMessage error={state.error} success={state.success} />
 

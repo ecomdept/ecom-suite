@@ -1,0 +1,9 @@
+import { BarChart3, TrendingUp } from "lucide-react";
+
+type SprintPoint = { label: string; used: number; capacity: number };
+
+export function ClientSprintReport({ points }: { points: SprintPoint[] }) {
+  const maximum = Math.max(1, ...points.map((point) => Math.max(point.used, point.capacity)));
+  const total = points.reduce((sum, point) => sum + point.used, 0);
+  return <section className="rounded-2xl border border-stone-200 bg-white p-5 shadow-sm sm:p-7"><div className="flex items-start justify-between gap-4"><div><p className="eyebrow">Reports</p><h2 className="font-display mt-2 text-3xl">Six-sprint delivery trend</h2><p className="mt-2 text-sm text-slate-500">A longer view of hours invested beyond the current sprint.</p></div><span className="grid size-11 place-items-center rounded-xl bg-pink-50 text-pink-600"><BarChart3 className="size-5"/></span></div><div className="mt-7 grid h-52 grid-cols-6 items-end gap-3 border-b border-stone-200 px-1">{points.map((point) => <div className="flex h-full flex-col justify-end" key={point.label}><div className="relative flex-1"><div className="absolute inset-x-0 bottom-0 rounded-t-md bg-pink-500 transition-all" style={{ height: `${Math.max(3, point.used / maximum * 100)}%` }}><span className="absolute -top-6 left-1/2 -translate-x-1/2 text-[10px] font-semibold text-slate-600">{point.used.toFixed(1)}h</span></div></div><p className="mt-2 truncate text-center text-[10px] text-slate-400">{point.label}</p></div>)}</div><div className="mt-5 flex flex-wrap items-center justify-between gap-3 text-sm"><span className="flex items-center gap-2 text-slate-500"><TrendingUp className="size-4 text-pink-600"/>{total.toFixed(1)} hours across {points.length} sprints</span><span className="text-xs text-slate-400">Pink bars show logged delivery time</span></div></section>;
+}
