@@ -92,7 +92,7 @@ export async function createProjectAction(
 
   if (validationError) return { error: validationError };
   if (!isProjectType(projectType)) return { error: "Select a valid project type." };
-  if (retainerHours === undefined) return { error: "Enter valid sprint hours." };
+  if (retainerHours === undefined) return { error: "Enter valid monthly retainer hours." };
   if (hourlyRate === undefined) return { error: "Enter a valid hourly rate." };
   if (!sprintStartDate || !isIsoDate(sprintStartDate)) return { error: "Select a valid sprint starting date." };
   const repositoryError = validateOptionalUrl(repositoryUrl ?? "", "GitHub repository URL");

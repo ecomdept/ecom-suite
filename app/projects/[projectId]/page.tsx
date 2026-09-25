@@ -16,6 +16,7 @@ import { isTicketPriority, isTicketStatus, isTicketType } from "@/lib/projects/v
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isAppRole, ROLE_LABELS } from "@/lib/auth/roles";
 import { formatSprintLabel, getSprintWindow } from "@/lib/projects/sprints";
+import { getMonthWindow } from "@/lib/projects/months";
 
 export const instant = false;
 
@@ -45,11 +46,15 @@ export default async function ProjectBoardPage({ params, searchParams }: { param
   const projectStatus = typedProject.status as "active" | "on_hold" | "completed";
   const projectRisk = typedProject.risk as "on_track" | "at_risk" | "off_track";
   const sprint = getSprintWindow(typedProject.sprint_start_date);
-  const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const currentMonth = getMonthWindow();
+  const previousMonth = getMonthWindow(new Date(), -1);
+  const reportingStart = typedProject.sprint_start_date < previousMonth.start
+    ? typedProject.sprint_start_date
+    : previousMonth.start;
   const [{ data: sprintEntries }, { data: committedHoursResult }] = await Promise.all([
     supabase.rpc("get_project_daily_time_totals", {
-      period_start: typedProject.sprint_start_date,
-      period_end: tomorrow,
+      period_start: reportingStart,
+      period_end: currentMonth.endExclusive,
     }).eq("project_id", projectId),
     supabase.rpc("get_project_committed_hours", { target_project_id: projectId }),
   ]);
@@ -103,14 +108,17 @@ export default async function ProjectBoardPage({ params, searchParams }: { param
     const entryDate = entry.work_date;
     return entryDate >= sprint.start && entryDate < sprint.endExclusive ? total + Number(entry.hours) : total;
   }, 0));
-  const committedHours = Math.max(0, Number(committedHoursResult ?? 0));
-  const previousSprintStart = new Date(new Date(`${sprint.start}T00:00:00.000Z`).getTime() - 14 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-  const previousSprintHours = Math.max(0, dailyTimeEntries.reduce((total, entry) => {
+  const monthlyLoggedHours = Math.max(0, dailyTimeEntries.reduce((total, entry) => {
     const entryDate = entry.work_date;
-    return entryDate >= previousSprintStart && entryDate < sprint.start ? total + Number(entry.hours) : total;
+    return entryDate >= currentMonth.start && entryDate < currentMonth.endExclusive ? total + Number(entry.hours) : total;
+  }, 0));
+  const committedHours = Math.max(0, Number(committedHoursResult ?? 0));
+  const previousMonthHours = Math.max(0, dailyTimeEntries.reduce((total, entry) => {
+    const entryDate = entry.work_date;
+    return entryDate >= previousMonth.start && entryDate < previousMonth.endExclusive ? total + Number(entry.hours) : total;
   }, 0));
   const baseRetainerHours = project.retainer_hours === null ? null : Number(project.retainer_hours);
-  const previousUnusedHours = baseRetainerHours === null ? 0 : Math.max(0, baseRetainerHours - previousSprintHours);
+  const previousUnusedHours = baseRetainerHours === null ? 0 : Math.max(0, baseRetainerHours - previousMonthHours);
   const rolloverHours = typedProject.project_type === "retainer" && typedProject.rollover_enabled
     ? Math.min(previousUnusedHours, typedProject.rollover_cap_hours === null ? previousUnusedHours : Number(typedProject.rollover_cap_hours))
     : 0;
@@ -193,7 +201,7 @@ export default async function ProjectBoardPage({ params, searchParams }: { param
           </div>
         </div>
 
-        <ProjectAnalytics activeTickets={activeTickets} audience={analyticsAudience} committedHours={committedHours} completedTickets={completedTickets} estimatedHours={estimatedHours} loggedHours={loggedHours} projectType={typedProject.project_type} retainerHours={baseRetainerHours === null ? null : baseRetainerHours + rolloverHours} rolloverHours={rolloverHours} sprintLabel={sprintLabel} sprintLoggedHours={sprintLoggedHours} />
+        <ProjectAnalytics activeTickets={activeTickets} audience={analyticsAudience} committedHours={committedHours} completedTickets={completedTickets} estimatedHours={estimatedHours} loggedHours={loggedHours} monthlyLabel={currentMonth.label} monthlyLoggedHours={monthlyLoggedHours} projectType={typedProject.project_type} retainerHours={baseRetainerHours === null ? null : baseRetainerHours + rolloverHours} rolloverHours={rolloverHours} sprintLabel={sprintLabel} sprintLoggedHours={sprintLoggedHours} />
 
         {canManage && <ProjectAdminSettings canManageAccess={userDirectoryAvailable} hourlyRate={typedProject.hourly_rate === null ? null : Number(typedProject.hourly_rate)} projectId={project.id} projectType={typedProject.project_type} repositoryUrl={typedProject.repository_url} retainerHours={project.retainer_hours === null ? null : Number(project.retainer_hours)} risk={projectRisk} rolloverCapHours={typedProject.rollover_cap_hours === null ? null : Number(typedProject.rollover_cap_hours)} rolloverEnabled={Boolean(typedProject.rollover_enabled)} selectedMemberIds={(memberships ?? []).map((membership) => membership.user_id)} sprintStartDate={typedProject.sprint_start_date} status={projectStatus} users={userOptions} />}
 

@@ -12,7 +12,7 @@ function points(values: number[], max: number, width: number, height: number, to
   return values.map((value, index) => `${(index / Math.max(1, values.length - 1)) * width},${top + height - (value / max) * height}`).join(" ");
 }
 
-export function SprintTrendCharts({ trends }: { trends: TrendPoint[] }) {
+export function MonthlyTrendCharts({ trends }: { trends: TrendPoint[] }) {
   const width = 680;
   const height = 150;
   const top = 12;
@@ -21,7 +21,7 @@ export function SprintTrendCharts({ trends }: { trends: TrendPoint[] }) {
   return (
     <div className="grid gap-6 xl:grid-cols-2">
       <section className="rounded-2xl border border-stone-200 bg-white p-5 shadow-sm sm:p-7" aria-labelledby="financial-trend-heading">
-        <div><h2 className="font-semibold" id="financial-trend-heading">Financial trend</h2><p className="mt-1 text-sm text-slate-500">Recognized revenue, delivery cost, and estimated gross profit by two-week cycle.</p></div>
+        <div><h2 className="font-semibold" id="financial-trend-heading">Financial trend</h2><p className="mt-1 text-sm text-slate-500">Recognized revenue, delivery cost, and estimated gross profit by calendar month.</p></div>
         <div className="mt-6 overflow-x-auto"><svg aria-label="Financial trend line chart" className="min-w-[620px]" role="img" viewBox={`0 0 ${width} 210`}><line stroke="#e7e5e4" x1="0" x2={width} y1={top + height} y2={top + height} />
           <polyline fill="none" points={points(trends.map((point) => point.revenue), moneyMax, width, height, top)} stroke="#f00073" strokeWidth="4" />
           <polyline fill="none" points={points(trends.map((point) => point.cost), moneyMax, width, height, top)} stroke="#94a3b8" strokeWidth="3" />

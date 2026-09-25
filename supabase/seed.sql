@@ -3,6 +3,24 @@
 -- This script is idempotent: fixed IDs and ON CONFLICT keep reruns safe.
 
 do $$
+begin
+  if not exists (
+    select 1
+    from pg_catalog.pg_type as types
+    join pg_catalog.pg_namespace as namespaces
+      on namespaces.oid = types.typnamespace
+    join pg_catalog.pg_enum as values
+      on values.enumtypid = types.oid
+    where namespaces.nspname = 'public'
+      and types.typname = 'ticket_status'
+      and values.enumlabel = 'archived'
+  ) then
+    raise exception 'Missing ticket_status value "archived". Run migration 20261005160000 separately, wait for Success, then rerun seed.sql.';
+  end if;
+end
+$$;
+
+do $$
 declare
   seed_owner uuid;
   seed_pm uuid;
@@ -72,7 +90,7 @@ begin
   ) values (
     retainer_project,
     '[Sample] Northstar Commerce Retainer',
-    'Demo retainer workspace for validating sprint capacity, approvals, UAT, workload, time tracking, and archived delivery history.',
+    'Demo retainer workspace for validating monthly capacity, approvals, UAT, workload, time tracking, and archived delivery history.',
     seed_owner,
     'retainer'::public.project_type,
     80,

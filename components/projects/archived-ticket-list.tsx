@@ -33,9 +33,11 @@ function formatHours(value: number) {
 export function ArchivedTicketList({
   projectId,
   tickets,
+  clientView = false,
 }: {
   projectId: string;
   tickets: ArchivedTicketRow[];
+  clientView?: boolean;
 }) {
   const sortedTickets = [...tickets].sort(
     (left, right) =>
@@ -55,10 +57,12 @@ export function ArchivedTicketList({
         <div>
           <p className="eyebrow">History</p>
           <h2 className="font-display mt-2 text-3xl leading-none" id="archive-heading">
-            Archived tasks
+            {clientView ? "Delivered archive" : "Archived tasks"}
           </h2>
           <p className="mt-2 text-sm text-slate-500">
-            Completed work organized by the month it was archived.
+            {clientView
+              ? "Previously delivered requests organized by month."
+              : "Completed work organized by the month it was archived."}
           </p>
         </div>
         <span className="rounded-full bg-stone-200 px-3 py-1 text-xs font-semibold text-slate-600">
@@ -79,16 +83,16 @@ export function ArchivedTicketList({
                   {monthTickets.length} {monthTickets.length === 1 ? "task" : "tasks"}
                 </span>
               </div>
-              <div className="hidden grid-cols-[minmax(0,1fr)_170px_130px_130px] border-b border-stone-100 px-7 py-3 text-[10px] font-semibold uppercase tracking-wider text-slate-400 md:grid">
+              <div className={`hidden border-b border-stone-100 px-7 py-3 text-[10px] font-semibold uppercase tracking-wider text-slate-400 md:grid ${clientView ? "grid-cols-[minmax(0,1fr)_170px_130px]" : "grid-cols-[minmax(0,1fr)_170px_130px_130px]"}`}>
                 <span>Task</span>
                 <span>Date</span>
                 <span>Estimated</span>
-                <span>Logged</span>
+                {!clientView && <span>Logged</span>}
               </div>
               <div className="divide-y divide-stone-100">
                 {monthTickets.map((ticket) => (
                   <article
-                    className="grid gap-4 px-5 py-4 sm:px-7 md:grid-cols-[minmax(0,1fr)_170px_130px_130px] md:items-center"
+                    className={`grid gap-4 px-5 py-4 sm:px-7 md:items-center ${clientView ? "md:grid-cols-[minmax(0,1fr)_170px_130px]" : "md:grid-cols-[minmax(0,1fr)_170px_130px_130px]"}`}
                     key={ticket.id}
                   >
                     <Link
@@ -113,14 +117,14 @@ export function ArchivedTicketList({
                         {formatHours(ticket.estimatedHours)}h
                       </p>
                     </div>
-                    <div>
+                    {!clientView && <div>
                       <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 md:hidden">
                         Logged
                       </p>
                       <p className="text-sm font-medium text-slate-900">
                         {formatHours(ticket.loggedHours)}h
                       </p>
-                    </div>
+                    </div>}
                   </article>
                 ))}
               </div>
@@ -132,7 +136,9 @@ export function ArchivedTicketList({
           <Archive aria-hidden="true" className="mx-auto size-8 text-slate-300" />
           <p className="mt-3 font-medium text-slate-700">No archived tasks yet</p>
           <p className="mt-1 text-sm text-slate-500">
-            Archive a completed ticket to move it out of the delivery board.
+            {clientView
+              ? "Delivered requests will appear here after they are archived."
+              : "Archive a completed ticket to move it out of the delivery board."}
           </p>
         </div>
       )}
