@@ -16,7 +16,9 @@ import {
   validateTicketTitle,
   validateLongText,
   validateOptionalUrl,
+  validateRepositoryUrl,
 } from "@/lib/projects/validation";
+import { parseGithubRepoUrl } from "@/lib/github/repo-url";
 
 export type ProjectActionState = {
   error?: string;
@@ -95,8 +97,9 @@ export async function createProjectAction(
   if (retainerHours === undefined) return { error: "Enter valid monthly retainer hours." };
   if (hourlyRate === undefined) return { error: "Enter a valid hourly rate." };
   if (!sprintStartDate || !isIsoDate(sprintStartDate)) return { error: "Select a valid sprint starting date." };
-  const repositoryError = validateOptionalUrl(repositoryUrl ?? "", "GitHub repository URL");
+  const repositoryError = validateRepositoryUrl(repositoryUrl ?? "", "GitHub repository URL");
   if (repositoryError) return { error: repositoryError };
+  const repositoryRef = repositoryUrl ? parseGithubRepoUrl(repositoryUrl) : null;
   if (clientLogo && (!projectLogoTypes.has(clientLogo.type) || clientLogo.size > 1024 * 1024)) {
     return { error: "Upload a PNG, JPG, or WebP logo no larger than 1 MB." };
   }
@@ -115,6 +118,8 @@ export async function createProjectAction(
       hourly_rate: hourlyRate,
       sprint_start_date: sprintStartDate,
       repository_url: repositoryUrl,
+      repo_owner: repositoryRef?.owner ?? null,
+      repo_name: repositoryRef?.repo ?? null,
       currency: "USD",
     })
     .select("id")
@@ -579,8 +584,9 @@ export async function updateProjectSettingsAction(
   if (!sprintStartDate || !isIsoDate(sprintStartDate)) return { error: "Select a valid sprint starting date." };
   if (!isProjectStatus(status)) return { error: "Select a valid project status." };
   if (!isProjectRisk(risk)) return { error: "Select a valid risk level." };
-  const repositoryError = validateOptionalUrl(repositoryUrl ?? "", "GitHub repository URL");
+  const repositoryError = validateRepositoryUrl(repositoryUrl ?? "", "GitHub repository URL");
   if (repositoryError) return { error: repositoryError };
+  const repositoryRef = repositoryUrl ? parseGithubRepoUrl(repositoryUrl) : null;
 
   const { supabase, role } = await getCurrentRole();
   if (role !== "admin" && role !== "project_manager") return { error: "Only administrators and project managers can update project settings." };
@@ -593,6 +599,8 @@ export async function updateProjectSettingsAction(
       hourly_rate: hourlyRate,
       sprint_start_date: sprintStartDate,
       repository_url: repositoryUrl,
+      repo_owner: repositoryRef?.owner ?? null,
+      repo_name: repositoryRef?.repo ?? null,
       status,
       risk,
       currency: "USD",

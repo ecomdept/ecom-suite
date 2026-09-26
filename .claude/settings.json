@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(echo \"=== ticket_comments table + policies \\(pattern to mirror\\) ===\" && sed -n '1,60p' supabase/migrations/20260921000000_*.sql)"
+    ],
+    "additionalDirectories": [
+      "/Users/antonismazellari/Documents/ecom-suite/supabase/migrations"
+    ]
+  }
+}

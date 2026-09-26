@@ -10,7 +10,9 @@ import { TicketUsageForm } from "@/components/projects/ticket-usage-form";
 import { TicketWorkflowPanel } from "@/components/projects/ticket-workflow-panel";
 import { Button } from "@/components/ui/button";
 import { MarkdownContent } from "@/components/ui/markdown-content";
+import { TicketAnalysisPanel } from "@/components/projects/ticket-analysis-panel";
 import { requireUser } from "@/lib/auth/session";
+import type { TicketAnalysisRow } from "@/lib/ai/ticket-analysis/types";
 import { isTicketPriority, isTicketStatus, isTicketType } from "@/lib/projects/validation";
 
 export const instant = false;
@@ -62,19 +64,21 @@ export default async function TicketPage({ params }: { params: Promise<{ project
   const { projectId, ticketId } = await params;
   const { supabase, claims } = await requireUser();
   const userId = typeof claims.sub === "string" ? claims.sub : "";
-  const [projectResult, ticketResult, commentsResult, roleResult, subtasksResult, membershipsResult] = await Promise.all([
+  const [projectResult, ticketResult, commentsResult, roleResult, subtasksResult, membershipsResult, analysisResult] = await Promise.all([
     supabase.from("projects").select("id, name, hourly_rate").eq("id", projectId).maybeSingle(),
-    supabase.from("tickets").select("id, project_id, title, description, status, priority, ticket_type, acceptance_criteria, reproduction_steps, expected_behavior, actual_behavior, affected_platforms, reference_url, preview_url, repository_url, design_url, dev_notes, assignee_id, due_date, estimated_hours, logged_hours, billable_amount, created_by, created_at, updated_at, work_category, approval_status, previous_estimated_hours").eq("id", ticketId).eq("project_id", projectId).maybeSingle(),
+    supabase.from("tickets").select("id, project_id, title, description, status, priority, ticket_type, acceptance_criteria, reproduction_steps, expected_behavior, actual_behavior, affected_platforms, reference_url, preview_url, repository_url, design_url, dev_notes, assignee_id, due_date, estimated_hours, logged_hours, billable_amount, created_by, created_at, updated_at, work_category, approval_status, previous_estimated_hours, client_summary").eq("id", ticketId).eq("project_id", projectId).maybeSingle(),
     supabase.from("ticket_comments").select("id, user_id, content, created_at, is_internal").eq("ticket_id", ticketId).order("created_at", { ascending: true }),
     supabase.from("user_roles").select("role").eq("user_id", userId).maybeSingle(),
     supabase.from("ticket_subtasks").select("id, title, description, is_completed, due_date, assignee_id, estimated_hours, logged_hours, created_at, subtask_type, is_internal, dev_pr_url, dev_preview_url, dev_notes").eq("ticket_id", ticketId).order("created_at", { ascending: true }),
     supabase.from("project_members").select("user_id").eq("project_id", projectId),
+    supabase.from("ticket_ai_analyses").select("id, ticket_id, project_id, status, repo_owner, repo_name, git_ref, commit_sha, result, error_message, model, author_name, created_by, created_at, completed_at").eq("ticket_id", ticketId).eq("status", "complete").order("created_at", { ascending: false }).limit(1).maybeSingle(),
   ]);
   const project = projectResult.data;
   const comments = commentsResult.data;
   const roleRecord = roleResult.data;
   const subtasks = subtasksResult.data;
   const memberships = membershipsResult.data;
+  const analysis = (analysisResult.data as TicketAnalysisRow | null) ?? null;
   let ticket = ticketResult.data;
 
   if (!ticket && (
@@ -88,7 +92,7 @@ export default async function TicketPage({ params }: { params: Promise<{ project
       .eq("id", ticketId)
       .eq("project_id", projectId)
       .maybeSingle();
-    ticket = legacyTicket ? { ...legacyTicket, reference_url: null, work_category: null, approval_status: "draft", previous_estimated_hours: null } : null;
+    ticket = legacyTicket ? { ...legacyTicket, reference_url: null, work_category: null, approval_status: "draft", previous_estimated_hours: null, client_summary: null } : null;
   }
 
   if (!project || !ticket || !isTicketStatus(ticket.status) || !isTicketPriority(ticket.priority) || !isTicketType(ticket.ticket_type)) notFound();
@@ -142,8 +146,11 @@ export default async function TicketPage({ params }: { params: Promise<{ project
               {((!isClient && ticket.dev_notes) || references.length > 0) && <div className="grid gap-6 border-t border-stone-100 bg-slate-50/60 p-5 sm:p-7">{references.length > 0 && <div><h2 className="text-sm font-semibold">Links and references</h2><div className="mt-3 flex flex-wrap gap-2">{references.map((reference) => <a className="inline-flex items-center gap-2 rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm font-medium text-pink-600 hover:border-pink-200" href={reference.url ?? undefined} key={reference.label} rel="noreferrer" target="_blank"><reference.icon aria-hidden="true" className="size-4" />{reference.label}<ExternalLink aria-hidden="true" className="size-3" /></a>)}</div></div>}{!isClient && ticket.dev_notes && <div><h2 className="text-sm font-semibold">Development notes</h2><div className="mt-3 rounded-xl bg-slate-950 p-4"><MarkdownContent className="text-slate-200" content={ticket.dev_notes} /></div></div>}</div>}
             </article>
 
+            {ticket.client_summary && <section className="rounded-2xl border border-emerald-200 bg-emerald-50/60 p-5 shadow-sm sm:p-7" aria-labelledby="client-summary-heading"><h2 className="text-sm font-semibold text-emerald-900" id="client-summary-heading">Summary</h2><MarkdownContent className="mt-3 text-emerald-950/80" content={ticket.client_summary} /></section>}
+
             {canManage && <TicketDetailsForm members={members} projectId={projectId} ticket={ticket} ticketId={ticketId} />}
             <TicketWorkflowPanel approvalStatus={ticket.approval_status ?? "draft"} canManage={canManage} estimatedHours={Number(ticket.estimated_hours)} isClient={isClient} previousEstimatedHours={ticket.previous_estimated_hours === null ? null : Number(ticket.previous_estimated_hours)} projectId={projectId} ticketId={ticketId} workCategory={ticket.work_category ?? null} />
+            {!isClient && <TicketAnalysisPanel analysis={analysis} canManage={canManage} clientSummary={ticket.client_summary} projectId={projectId} ticketId={ticketId} />}
             {!isClient && <SubtaskSection canWork={canWork} members={members} projectId={projectId} subtasks={subtasks ?? []} ticketDevNotes={ticket.dev_notes} ticketId={ticketId} ticketPreviewUrl={ticket.preview_url} ticketRepositoryUrl={ticket.repository_url} />}
             {isClient && clientFeedbackItems.length > 0 && <section className="rounded-2xl border border-stone-200 bg-white p-5 shadow-sm sm:p-7"><h2 className="text-lg font-semibold">UAT feedback history</h2><p className="mt-1 text-sm text-slate-500">Feedback previously sent back to the delivery team.</p><div className="mt-5 grid gap-3">{clientFeedbackItems.map((feedback) => <article className="rounded-xl border border-stone-200 bg-slate-50 p-4" key={feedback.id}><MarkdownContent content={feedback.description ?? "No feedback details provided."}/></article>)}</div></section>}
 

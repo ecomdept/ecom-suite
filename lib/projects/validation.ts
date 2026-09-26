@@ -1,3 +1,5 @@
+import { parseGithubRepoUrl } from "@/lib/github/repo-url";
+
 export const TICKET_STATUSES = ["backlog", "pending_approval", "in_progress", "client_uat", "ready_for_deploy", "completed", "archived"] as const;
 export const TICKET_PRIORITIES = ["low", "medium", "high"] as const;
 export const TICKET_TYPES = ["new_feature", "feature_update", "bug"] as const;
@@ -85,4 +87,12 @@ export function validateOptionalUrl(value: string, label: string) {
 
 export function validateLongText(value: string, label: string, maximum = 5000) {
   return value.trim().length > maximum ? `${label} must be ${maximum.toLocaleString()} characters or less.` : null;
+}
+
+export function validateRepositoryUrl(value: string, label: string) {
+  const base = validateOptionalUrl(value, label);
+  if (base || !value.trim()) return base;
+  return parseGithubRepoUrl(value)
+    ? null
+    : `${label} must be a GitHub repository URL, for example https://github.com/company/repository.`;
 }
